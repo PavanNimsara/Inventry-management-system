@@ -174,12 +174,12 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="inventory.php" class="sidebar-item-link">
                         <i class="fa-solid fa-box"></i> <span>Inventory Items</span>
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="categories.php" class="sidebar-item-link">
                         <i class="fa-solid fa-tags"></i> <span>Categories</span>
                     </a>
                 </li>

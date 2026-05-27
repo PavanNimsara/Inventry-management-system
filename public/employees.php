@@ -12,8 +12,9 @@ $auth->restrictToLoggedIn();
 $userId = $_SESSION['user_id'];
 $user = $auth->getUserDetails($userId);
 
-// Database Migration for Employees Table
+// Database Migration for Employees and Issued Items
 try {
+    // Create employees table
     $db->exec("CREATE TABLE IF NOT EXISTS employees (
         id INT AUTO_INCREMENT PRIMARY KEY,
         branch_id INT NOT NULL,
@@ -27,6 +28,18 @@ try {
         mail_address VARCHAR(100) NOT NULL,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    // Create issued_items table
+    $db->exec("CREATE TABLE IF NOT EXISTS issued_items (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        employee_id INT NOT NULL,
+        item_id INT NOT NULL,
+        quantity INT NOT NULL,
+        issue_date DATE NOT NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (employee_id) REFERENCES employees(id) ON DELETE CASCADE,
+        FOREIGN KEY (item_id) REFERENCES inventory_items(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
 } catch (Exception $e) {
     $migrationError = "Setup error: " . $e->getMessage();
@@ -114,9 +127,65 @@ if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['a
     }
 }
 
+// Handle Issuing Inventory Items to Employee
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['action'] == 'issue_item') {
+    $employee_id = intval($_POST['issue_employee_id']);
+    $item_id = intval($_POST['issue_item_id']);
+    $quantity = intval($_POST['issue_quantity']);
+    $issue_date = $_POST['issue_date'];
+    
+    if ($employee_id > 0 && $item_id > 0 && $quantity > 0 && !empty($issue_date)) {
+        try {
+            // Check available stock in warehouse
+            $stockStmt = $db->prepare("SELECT name, quantity FROM inventory_items WHERE id = :id");
+            $stockStmt->execute([':id' => $item_id]);
+            $item = $stockStmt->fetch();
+            
+            if (!$item) {
+                $message = "Item does not exist in inventory.";
+                $messageType = "error";
+            } elseif ($item['quantity'] < $quantity) {
+                $message = "Insufficient stock for '{$item['name']}'. Available quantity: {$item['quantity']}.";
+                $messageType = "error";
+            } else {
+                $db->beginTransaction();
+                
+                // Deduct stock from inventory
+                $deductStmt = $db->prepare("UPDATE inventory_items SET quantity = quantity - :qty WHERE id = :id");
+                $deductStmt->execute([':qty' => $quantity, ':id' => $item_id]);
+                
+                // Log issuance record
+                $issueStmt = $db->prepare("INSERT INTO issued_items (employee_id, item_id, quantity, issue_date) VALUES (:employee_id, :item_id, :quantity, :issue_date)");
+                $issueStmt->execute([
+                    ':employee_id' => $employee_id,
+                    ':item_id' => $item_id,
+                    ':quantity' => $quantity,
+                    ':issue_date' => $issue_date
+                ]);
+                
+                $db->commit();
+                $message = "Inventory item successfully issued to employee!";
+                $messageType = "success";
+            }
+        } catch (Exception $e) {
+            if ($db->inTransaction()) $db->rollBack();
+            $message = "Failed to issue item: " . $e->getMessage();
+            $messageType = "error";
+        }
+    } else {
+        $message = "Please fill in all details correctly.";
+        $messageType = "error";
+    }
+}
+
 // Fetch all companies for filters and dropdowns
 $companiesStmt = $db->query("SELECT id, name FROM companies ORDER BY name ASC");
 $companies = $companiesStmt->fetchAll();
+
+// Fetch active inventory categories for selection dropdown
+$categoriesStmt = $db->query("SELECT id, name FROM inventory_categories ORDER BY name ASC");
+$inventory_categories = $categoriesStmt->fetchAll();
+
 
 // --- Filtration and Search logic ---
 $search = isset($_GET['search']) ? trim($_GET['search']) : '';
@@ -346,6 +415,33 @@ $employees = $dataStmt->fetchAll();
             border: 1px solid rgba(168, 85, 247, 0.3);
             color: #d8b4fe;
         }
+        .clickable-name {
+            cursor: pointer;
+            text-decoration: underline;
+            color: #818cf8;
+            transition: color 0.2s ease;
+        }
+        .clickable-name:hover {
+            color: #a5b4fc;
+        }
+        .btn-issue {
+            padding: 0.4rem 0.75rem;
+            background: var(--accent-gradient);
+            color: #ffffff;
+            border-radius: 8px;
+            font-weight: 600;
+            font-size: 0.8rem;
+            display: inline-flex;
+            align-items: center;
+            gap: 0.25rem;
+            cursor: pointer;
+            border: none;
+            transition: transform 0.2s ease;
+        }
+        .btn-issue:hover {
+            transform: translateY(-1px);
+            filter: brightness(1.1);
+        }
     </style>
 </head>
 <body class="dashboard-body">
@@ -379,12 +475,12 @@ $employees = $dataStmt->fetchAll();
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="inventory.php" class="sidebar-item-link">
                         <i class="fa-solid fa-box"></i> <span>Inventory Items</span>
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="categories.php" class="sidebar-item-link">
                         <i class="fa-solid fa-tags"></i> <span>Categories</span>
                     </a>
                 </li>
@@ -476,10 +572,10 @@ $employees = $dataStmt->fetchAll();
                 </form>
             </div>
 
-            <!-- Employee Directory Directory Panel -->
+            <!-- Employee Directory Table Panel -->
             <div class="list-panel-full">
                 <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text-primary);">Employee Directory</h3>
-                <p style="font-size: 0.85rem; color: var(--text-secondary);">Showing registered employees in the filtered view</p>
+                <p style="font-size: 0.85rem; color: var(--text-secondary);">Click on an employee's name to view their issued inventory details</p>
                 
                 <div class="table-responsive">
                     <?php if(count($employees) > 0): ?>
@@ -491,17 +587,19 @@ $employees = $dataStmt->fetchAll();
                                     <th>Full Name</th>
                                     <th>Designation</th>
                                     <th>Company / Branch</th>
-                                    <th>NIC</th>
                                     <th>Mobile</th>
                                     <th>Email</th>
                                     <th>Join Date</th>
+                                    <th style="text-align: center;">Actions</th>
                                 </tr>
                             </thead>
                             <tbody>
                                 <?php foreach($employees as $emp): ?>
                                     <tr>
                                         <td style="font-weight:700; color: var(--accent-color);"><?php echo htmlspecialchars($emp['emp_no']); ?></td>
-                                        <td style="font-weight:600;"><?php echo htmlspecialchars($emp['calling_name']); ?></td>
+                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>">
+                                            <strong><?php echo htmlspecialchars($emp['calling_name']); ?></strong>
+                                        </td>
                                         <td style="color:var(--text-secondary);"><?php echo htmlspecialchars($emp['full_name']); ?></td>
                                         <td><?php echo htmlspecialchars($emp['designation']); ?></td>
                                         <td>
@@ -512,10 +610,14 @@ $employees = $dataStmt->fetchAll();
                                                 <?php echo htmlspecialchars($emp['branch_name']); ?>
                                             </span>
                                         </td>
-                                        <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['nic_number']); ?></td>
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['mobile_number']); ?></td>
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['mail_address']); ?></td>
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['joining_date']); ?></td>
+                                        <td style="text-align: center;">
+                                            <button class="btn-issue open-issue-btn" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>">
+                                                <i class="fa-solid fa-hand-holding"></i> Issue Item
+                                            </button>
+                                        </td>
                                     </tr>
                                 <?php endforeach; ?>
                             </tbody>
@@ -556,7 +658,7 @@ $employees = $dataStmt->fetchAll();
     <!-- Add Employee Form Modal -->
     <div id="add-employee-modal" class="modal">
         <div class="modal-content">
-            <span class="close-btn" id="close-modal-btn">&times;</span>
+            <span class="close-btn" id="close-add-modal-btn">&times;</span>
             <h3 style="font-size: 1.35rem; margin-bottom: 1.5rem; color: var(--text-primary); border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem;">Add New Employee</h3>
             <form method="POST" action="">
                 <input type="hidden" name="action" value="add_employee">
@@ -625,7 +727,107 @@ $employees = $dataStmt->fetchAll();
         </div>
     </div>
 
-    <!-- JavaScript to handle dynamic filters, modal toggles, and AJAX branch loading -->
+    <!-- Issue Inventory Item Modal -->
+    <div id="issue-item-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close-btn" id="close-issue-modal-btn">&times;</span>
+            <h3 style="font-size: 1.35rem; margin-bottom: 1.5rem; color: var(--text-primary); border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem;">Issue Stock to <span id="issue-employee-name" style="color: var(--accent-color);"></span></h3>
+            <form method="POST" action="">
+                <input type="hidden" name="action" value="issue_item">
+                <input type="hidden" id="issue-employee-id" name="issue_employee_id">
+                
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Select Category</label>
+                    <select id="issue-category-select" class="form-control custom-select" required>
+                        <option value="" disabled selected>Select Category...</option>
+                        <?php foreach($inventory_categories as $cat): ?>
+                            <option value="<?php echo $cat['id']; ?>"><?php echo htmlspecialchars($cat['name']); ?></option>
+                        <?php endforeach; ?>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Select Inventory Item</label>
+                    <select id="issue-item-select" name="issue_item_id" class="form-control custom-select" required disabled>
+                        <option value="" disabled selected>Select Category First...</option>
+                    </select>
+                </div>
+
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Quantity to Issue</label>
+                    <input type="number" name="issue_quantity" class="form-control" min="1" placeholder="e.g. 5" required>
+                </div>
+
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Issue Date</label>
+                    <input type="date" name="issue_date" class="form-control" value="<?php echo date('Y-m-d'); ?>" required>
+                </div>
+
+                <button type="submit" class="btn-primary" style="margin-top: 1.5rem; padding: 0.8rem;">Confirm Issue</button>
+            </form>
+        </div>
+    </div>
+
+    <!-- View Employee Details & Issued Items Modal -->
+    <div id="view-employee-modal" class="modal">
+        <div class="modal-content" style="max-width: 750px;">
+            <span class="close-btn" id="close-view-modal-btn">&times;</span>
+            <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.75rem;">
+                <h3 style="font-size: 1.35rem; color: var(--text-primary); margin: 0;">Employee Profile & Issued Items</h3>
+                <a id="export-pdf-btn" href="#" target="_blank" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; width: auto; margin-top: 0; box-shadow: none; border-radius: 8px; margin-right: 2.2rem;">
+                    <i class="fa-solid fa-file-pdf"></i> Export PDF
+                </a>
+            </div>
+            
+            <!-- Employee Info Block -->
+            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; background: rgba(255,255,255,0.02); padding: 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border);">
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Full Name</span>
+                    <strong id="view-emp-fullname" style="color:#ffffff;"></strong>
+                </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">EMP NO</span>
+                    <strong id="view-emp-no" style="color:var(--accent-color);"></strong>
+                </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Designation</span>
+                    <strong id="view-emp-desig" style="color:#ffffff;"></strong>
+                </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Company / Branch</span>
+                    <strong id="view-emp-company" style="color:#ffffff; font-size: 0.9rem;"></strong>
+                </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">NIC Number</span>
+                    <span id="view-emp-nic" style="color:#ffffff;"></span>
+                </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Contact Details</span>
+                    <span id="view-emp-contact" style="color:#ffffff; font-size:0.85rem; display:block;"></span>
+                </div>
+            </div>
+
+            <!-- Issued Items Table -->
+            <h4 style="font-size:1.1rem; color: var(--text-primary); margin-bottom: 0.75rem;">Issued Inventory Items</h4>
+            <div class="table-responsive" style="max-height: 250px; overflow-y: auto;">
+                <table class="employee-table" id="view-issued-table">
+                    <thead>
+                        <tr>
+                            <th>Category</th>
+                            <th>Item Name</th>
+                            <th>Issued Qty</th>
+                            <th>Issue Date</th>
+                        </tr>
+                    </thead>
+                    <tbody id="view-issued-tbody">
+                        <!-- AJAX populated -->
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    </div>
+
+    <!-- JavaScript to handle dynamic filters, modals, and AJAX branch/issues loading -->
     <script>
         document.addEventListener("DOMContentLoaded", function() {
             // Sidebar layout toggle
@@ -642,27 +844,164 @@ $employees = $dataStmt->fetchAll();
                 });
             }
 
-            // Modal elements and logic
-            const modal = document.getElementById("add-employee-modal");
-            const openModalBtn = document.getElementById("open-modal-btn");
-            const closeModalBtn = document.getElementById("close-modal-btn");
+            // Modal elements
+            const addModal = document.getElementById("add-employee-modal");
+            const issueModal = document.getElementById("issue-item-modal");
+            const viewModal = document.getElementById("view-employee-modal");
             
-            if (openModalBtn) {
-                openModalBtn.addEventListener("click", () => {
-                    modal.classList.add("show");
-                });
+            const openAddBtn = document.getElementById("open-modal-btn");
+            const closeAddBtn = document.getElementById("close-add-modal-btn");
+            const closeIssueBtn = document.getElementById("close-issue-modal-btn");
+            const closeViewBtn = document.getElementById("close-view-modal-btn");
+
+            // Open Add Modal
+            if (openAddBtn) {
+                openAddBtn.addEventListener("click", () => addModal.classList.add("show"));
             }
-            if (closeModalBtn) {
-                closeModalBtn.addEventListener("click", () => {
-                    modal.classList.remove("show");
-                });
+            if (closeAddBtn) {
+                closeAddBtn.addEventListener("click", () => addModal.classList.remove("show"));
             }
+
+            // Close Modals
+            if (closeIssueBtn) {
+                closeIssueBtn.addEventListener("click", () => issueModal.classList.remove("show"));
+            }
+            if (closeViewBtn) {
+                closeViewBtn.addEventListener("click", () => viewModal.classList.remove("show"));
+            }
+
             // Close modal when clicking outside contents
             window.addEventListener("click", (event) => {
-                if (event.target === modal) {
-                    modal.classList.remove("show");
-                }
+                if (event.target === addModal) addModal.classList.remove("show");
+                if (event.target === issueModal) issueModal.classList.remove("show");
+                if (event.target === viewModal) viewModal.classList.remove("show");
             });
+
+            // Elements for category filter in Issue Stock modal
+            const categorySelect = document.getElementById("issue-category-select");
+            const itemSelect = document.getElementById("issue-item-select");
+
+            // Handle "Issue Item" button click
+            const issueBtns = document.querySelectorAll(".open-issue-btn");
+            issueBtns.forEach(btn => {
+                btn.addEventListener("click", function(e) {
+                    e.stopPropagation();
+                    const empId = this.dataset.id;
+                    const empName = this.dataset.name;
+                    
+                    document.getElementById("issue-employee-id").value = empId;
+                    document.getElementById("issue-employee-name").textContent = empName;
+                    
+                    // Reset fields
+                    if (categorySelect) categorySelect.value = "";
+                    if (itemSelect) {
+                        itemSelect.innerHTML = '<option value="" disabled selected>Select Category First...</option>';
+                        itemSelect.disabled = true;
+                    }
+                    
+                    issueModal.classList.add("show");
+                });
+            });
+
+            // Handle Category selection change to load dynamic items
+            if (categorySelect && itemSelect) {
+                categorySelect.addEventListener("change", function() {
+                    const categoryId = this.value;
+                    if (!categoryId) {
+                        itemSelect.innerHTML = '<option value="" disabled selected>Select Category First...</option>';
+                        itemSelect.disabled = true;
+                        return;
+                    }
+                    
+                    itemSelect.innerHTML = '<option value="" disabled selected>Loading items...</option>';
+                    itemSelect.disabled = true;
+                    
+                    fetch('get_category_items.php?category_id=' + categoryId)
+                        .then(response => response.json())
+                        .then(data => {
+                            itemSelect.innerHTML = '<option value="" disabled selected>Select Item (In stock)...</option>';
+                            if (data.error) {
+                                console.error(data.error);
+                                itemSelect.innerHTML = '<option value="" disabled selected>Error loading items</option>';
+                                return;
+                            }
+                            if (Array.isArray(data) && data.length > 0) {
+                                data.forEach(item => {
+                                    const option = document.createElement("option");
+                                    option.value = item.id;
+                                    option.textContent = `${item.name} (Available: ${item.quantity})`;
+                                    itemSelect.appendChild(option);
+                                });
+                                itemSelect.disabled = false;
+                            } else {
+                                itemSelect.innerHTML = '<option value="" disabled selected>No items in stock for this category</option>';
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error fetching items:', err);
+                            itemSelect.innerHTML = '<option value="" disabled selected>Failed to load items</option>';
+                        });
+                });
+            }
+
+            // Handle Click Employee Name to View Issued Items Detail Modal
+            const clickableNames = document.querySelectorAll(".clickable-name");
+            clickableNames.forEach(cell => {
+                cell.addEventListener("click", function() {
+                    const empId = this.dataset.id;
+                    
+                    // Set PDF export link
+                    document.getElementById("export-pdf-btn").href = 'export_employee_pdf.php?employee_id=' + empId;
+                    
+                    // Set Profile Details in Modal
+                    document.getElementById("view-emp-fullname").textContent = this.dataset.fullname;
+                    document.getElementById("view-emp-no").textContent = this.dataset.empno;
+                    document.getElementById("view-emp-desig").textContent = this.dataset.desig;
+                    document.getElementById("view-emp-company").textContent = this.dataset.comp + " (" + this.dataset.branch + ")";
+                    document.getElementById("view-emp-nic").textContent = this.dataset.nic;
+                    document.getElementById("view-emp-contact").innerHTML = '<i class="fa-solid fa-phone"></i> ' + this.dataset.mobile + '<br><i class="fa-solid fa-envelope"></i> ' + this.dataset.email;
+                    
+                    // Clear and load dynamic issued items via AJAX
+                    const tbody = document.getElementById("view-issued-tbody");
+                    tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 1.5rem 0; color:var(--text-secondary);">Loading issued items...</td></tr>';
+                    
+                    viewModal.classList.add("show");
+                    
+                    fetch('get_employee_issues.php?employee_id=' + empId)
+                        .then(response => response.json())
+                        .then(data => {
+                            tbody.innerHTML = '';
+                            if (data.length > 0) {
+                                data.forEach(issue => {
+                                    const row = document.createElement('tr');
+                                    row.innerHTML = `
+                                        <td><span class="badge category-badge">${escapeHtml(issue.category_name)}</span></td>
+                                        <td style="font-weight:600;">${escapeHtml(issue.item_name)}</td>
+                                        <td><span class="badge qty-badge">${issue.quantity}</span></td>
+                                        <td style="font-size:0.9rem; color:var(--text-secondary);">${issue.issue_date}</td>
+                                    `;
+                                    tbody.appendChild(row);
+                                });
+                            } else {
+                                tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 2rem 0; color:var(--text-secondary);"><i class="fa-solid fa-box-open" style="display:block; font-size:2rem; margin-bottom:0.5rem; opacity:0.2;"></i> No items issued to this employee yet.</td></tr>';
+                            }
+                        })
+                        .catch(err => {
+                            console.error('Error fetching issued items:', err);
+                            tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 1.5rem 0; color:var(--error-color);">Failed to load issued items.</td></tr>';
+                        });
+                });
+            });
+
+            // Helper to escape HTML safely in JS
+            function escapeHtml(text) {
+                return text
+                    .replace(/&/g, "&amp;")
+                    .replace(/</g, "&lt;")
+                    .replace(/>/g, "&gt;")
+                    .replace(/"/g, "&quot;")
+                    .replace(/'/g, "&#039;");
+            }
 
             // AJAX loader for Add Employee Modal Dropdown
             const companySelect = document.getElementById("company-select");

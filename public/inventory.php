@@ -168,6 +168,8 @@ $items = $dataStmt->fetchAll();
     <link rel="stylesheet" href="css/style.css?v=<?php echo time(); ?>">
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Theme Manager -->
+    <script src="js/theme.js"></script>
     <style>
         .page-header-row {
             display: flex;
@@ -378,6 +380,17 @@ $items = $dataStmt->fetchAll();
             </ul>
 
             <div class="sidebar-footer">
+                <div class="sidebar-theme-panel" style="padding-top: 1.25rem; border-top: 1px solid var(--panel-border); margin-bottom: 0.5rem; width: 100%;">
+                    <span style="font-size: 0.75rem; font-weight: 700; text-transform: uppercase; letter-spacing: 0.75px; color: var(--text-secondary); margin-bottom: 0.75rem; display: block; padding-left: 0.25rem;">Theme Mode</span>
+                    <div class="theme-switch-container">
+                        <button class="theme-switch-btn" data-theme="light">
+                            <span style="font-size: 0.95rem;">☀️</span> <span>Light</span>
+                        </button>
+                        <button class="theme-switch-btn" data-theme="dark">
+                            <span style="font-size: 0.95rem;">🌙</span> <span>Dark</span>
+                        </button>
+                    </div>
+                </div>
                 <a href="logout.php" class="sidebar-item-link" style="color: var(--error-color);">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i> <span>Logout</span>
                 </a>

@@ -11,6 +11,22 @@ $auth->restrictToLoggedIn();
 
 $userId = $_SESSION['user_id'];
 $user = $auth->getUserDetails($userId);
+
+// Fetch total inventory items quantity
+$totalItemsStmt = $db->query("SELECT SUM(quantity) FROM inventory_items");
+$totalItems = intval($totalItemsStmt->fetchColumn());
+
+// Fetch low stock items details (quantity below 5)
+$lowStockStmt = $db->query("SELECT i.name, i.quantity, c.name as category_name FROM inventory_items i INNER JOIN inventory_categories c ON i.category_id = c.id WHERE i.quantity < 5 ORDER BY i.quantity ASC, i.name ASC");
+$lowStockItems = $lowStockStmt->fetchAll(PDO::FETCH_ASSOC);
+$lowStockCount = count($lowStockItems);
+
+// Fetch total issues count and issues today
+$totalIssuesStmt = $db->query("SELECT COUNT(*) FROM issued_items");
+$totalIssues = intval($totalIssuesStmt->fetchColumn());
+
+$issuesTodayStmt = $db->query("SELECT SUM(quantity) FROM issued_items WHERE DATE(issue_date) = CURDATE()");
+$issuesToday = intval($issuesTodayStmt->fetchColumn());
 ?>
 
 <!DOCTYPE html>
@@ -54,12 +70,12 @@ $user = $auth->getUserDetails($userId);
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="inventory.php" class="sidebar-item-link">
                         <i class="fa-solid fa-box"></i> <span>Inventory Items</span>
                     </a>
                 </li>
                 <li>
-                    <a href="#" class="sidebar-item-link">
+                    <a href="categories.php" class="sidebar-item-link">
                         <i class="fa-solid fa-tags"></i> <span>Categories</span>
                     </a>
                 </li>
@@ -103,9 +119,9 @@ $user = $auth->getUserDetails($userId);
                             <h3 style="color: var(--accent-color); font-size: 1.1rem; font-weight: 600;">Total Items</h3>
                             <i class="fa-solid fa-box-open" style="color: var(--accent-color); font-size: 1.25rem;"></i>
                         </div>
-                        <p style="font-size: 2.25rem; font-weight: 700; margin-bottom: 0.5rem;">1,248</p>
-                        <span style="font-size: 0.85rem; color: var(--success-color);">
-                            <i class="fa-solid fa-arrow-trend-up"></i> ↑ 12% this week
+                        <p style="font-size: 2.25rem; font-weight: 700; margin-bottom: 0.5rem;"><?php echo number_format($totalItems); ?></p>
+                        <span style="font-size: 0.85rem; color: var(--text-secondary);">
+                            Total stock in warehouse
                         </span>
                     </div>
                     
@@ -114,18 +130,35 @@ $user = $auth->getUserDetails($userId);
                             <h3 style="color: #a855f7; font-size: 1.1rem; font-weight: 600;">Low Stock Alerts</h3>
                             <i class="fa-solid fa-triangle-exclamation" style="color: var(--error-color); font-size: 1.25rem;"></i>
                         </div>
-                        <p style="font-size: 2.25rem; font-weight: 700; color: var(--error-color); margin-bottom: 0.5rem;">5</p>
-                        <span style="font-size: 0.85rem; color: var(--text-secondary);">Items needing attention</span>
+                        <p style="font-size: 2.25rem; font-weight: 700; color: var(--error-color); margin-bottom: 0.5rem;"><?php echo $lowStockCount; ?></p>
+                        <span style="font-size: 0.85rem; color: var(--text-secondary); display: block; margin-bottom: 0.5rem;">Quantity below 5 units</span>
+                        
+                        <?php if ($lowStockCount > 0): ?>
+                            <div style="margin-top: 1rem; border-top: 1px solid rgba(255, 255, 255, 0.08); padding-top: 0.75rem;">
+                                <ul style="list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 0.5rem;">
+                                    <?php foreach ($lowStockItems as $item): ?>
+                                        <li style="font-size: 0.85rem; color: var(--text-primary); display: flex; justify-content: space-between; align-items: center; gap: 0.5rem;">
+                                            <span style="display: inline-flex; align-items: center; gap: 0.45rem; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
+                                                <i class="fa-solid fa-circle" style="color: var(--error-color); font-size: 0.45rem; flex-shrink: 0;"></i>
+                                                <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;"><?php echo htmlspecialchars($item['name']); ?></span>
+                                                <span style="font-size: 0.75rem; color: var(--text-secondary); flex-shrink: 0;">(<?php echo htmlspecialchars($item['category_name']); ?>)</span>
+                                            </span>
+                                            <strong style="color: var(--error-color); flex-shrink: 0;"><?php echo $item['quantity']; ?> left</strong>
+                                        </li>
+                                    <?php endforeach; ?>
+                                </ul>
+                            </div>
+                        <?php endif; ?>
                     </div>
                     
                     <div class="stat-card">
                         <div style="display: flex; justify-content: space-between; align-items: start; margin-bottom: 1rem;">
-                            <h3 style="color: #06b6d4; font-size: 1.1rem; font-weight: 600;">Recent Transactions</h3>
-                            <i class="fa-solid fa-arrow-right-arrow-left" style="color: #06b6d4; font-size: 1.25rem;"></i>
+                            <h3 style="color: #06b6d4; font-size: 1.1rem; font-weight: 600;">Recent Issues</h3>
+                            <i class="fa-solid fa-arrow-right-to-bracket" style="color: #06b6d4; font-size: 1.25rem;"></i>
                         </div>
-                        <p style="font-size: 2.25rem; font-weight: 700; margin-bottom: 0.5rem;">34</p>
+                        <p style="font-size: 2.25rem; font-weight: 700; margin-bottom: 0.5rem;"><?php echo number_format($totalIssues); ?></p>
                         <span style="font-size: 0.85rem; color: var(--success-color);">
-                            <i class="fa-solid fa-circle-check"></i> Transactions today
+                            <i class="fa-solid fa-circle-check"></i> <?php echo $issuesToday; ?> issues today
                         </span>
                     </div>
                 </div>

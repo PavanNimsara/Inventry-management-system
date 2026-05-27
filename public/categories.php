@@ -12,87 +12,44 @@ $auth->restrictToLoggedIn();
 $userId = $_SESSION['user_id'];
 $user = $auth->getUserDetails($userId);
 
-// Database Migration & Seeding for Companies and Branches
-try {
-    // Create companies table
-    $db->exec("CREATE TABLE IF NOT EXISTS companies (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        name VARCHAR(150) NOT NULL UNIQUE,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    
-    // Create branches table
-    $db->exec("CREATE TABLE IF NOT EXISTS branches (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        company_id INT NOT NULL,
-        name VARCHAR(100) NOT NULL,
-        address VARCHAR(255) NOT NULL,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (company_id) REFERENCES companies(id) ON DELETE CASCADE
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4;");
-    
-    // Seed default companies if table is empty
-    $checkCompaniesCount = $db->query("SELECT COUNT(*) FROM companies");
-    if ($checkCompaniesCount->fetchColumn() == 0) {
-        $companiesToSeed = [
-            "Commercial Micro Credit",
-            "Monik International Pvt Ltd",
-            "Ceylon Monik Building Society Limited",
-            "Monik Homes Pvt Ltd",
-            "Monik Water Pvt Ltd",
-            "Monik Trading Pvt LTD",
-            "Monik Agro Pvt Ltd",
-            "Monik Land"
-        ];
-        $stmtSeed = $db->prepare("INSERT INTO companies (name) VALUES (:name)");
-        foreach ($companiesToSeed as $companyName) {
-            $stmtSeed->execute([':name' => $companyName]);
-        }
-    }
-} catch (Exception $e) {
-    $migrationError = "Setup error: " . $e->getMessage();
-}
-
 $message = "";
 $messageType = "";
 
-// Handle Adding a New Branch
-if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['action'] == 'add_branch') {
-    $company_id = intval($_POST['company_id']);
-    $branch_name = trim($_POST['branch_name']);
-    $branch_address = trim($_POST['branch_address']);
+// Handle Adding a New Category
+if ($_SERVER["REQUEST_METHOD"] == "POST" && isset($_POST['action']) && $_POST['action'] == 'add_category') {
+    $category_name = trim($_POST['category_name']);
     
-    if ($company_id > 0 && !empty($branch_name) && !empty($branch_address)) {
+    if (!empty($category_name)) {
         try {
-            $insertQuery = "INSERT INTO branches (company_id, name, address) VALUES (:company_id, :name, :address)";
+            $insertQuery = "INSERT INTO inventory_categories (name) VALUES (:name)";
             $insertStmt = $db->prepare($insertQuery);
-            $insertStmt->execute([
-                ':company_id' => $company_id,
-                ':name' => $branch_name,
-                ':address' => $branch_address
-            ]);
-            $message = "Branch added successfully!";
+            $insertStmt->execute([':name' => $category_name]);
+            $message = "Category added successfully!";
             $messageType = "success";
         } catch (PDOException $e) {
-            $message = "Failed to add branch: " . $e->getMessage();
+            if ($e->errorInfo[1] == 1062) { // Unique constraint violation
+                $message = "Failed to add category: Category name already exists.";
+            } else {
+                $message = "Failed to add category: " . $e->getMessage();
+            }
             $messageType = "error";
         }
     } else {
-        $message = "Please fill in all the fields.";
+        $message = "Please enter a category name.";
         $messageType = "error";
     }
 }
 
-// Fetch all companies for the dropdown
-$companiesStmt = $db->query("SELECT id, name FROM companies ORDER BY name ASC");
-$companies = $companiesStmt->fetchAll();
-
-// Fetch all branches with their company name
-$branchesStmt = $db->query("SELECT b.id, b.name as branch_name, b.address, c.name as company_name 
-                            FROM branches b 
-                            INNER JOIN companies c ON b.company_id = c.id 
-                            ORDER BY c.name ASC, b.name ASC");
-$branches = $branchesStmt->fetchAll();
+// Fetch all categories with statistics (total item types and total stock)
+$categoriesQuery = "
+    SELECT c.id, c.name, COUNT(i.id) as total_items, IFNULL(SUM(i.quantity), 0) as total_quantity
+    FROM inventory_categories c
+    LEFT JOIN inventory_items i ON c.id = i.category_id
+    GROUP BY c.id, c.name
+    ORDER BY c.name ASC
+";
+$categoriesStmt = $db->query($categoriesQuery);
+$categories = $categoriesStmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
 <!DOCTYPE html>
@@ -100,7 +57,7 @@ $branches = $branchesStmt->fetchAll();
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
-    <title>Branches - Inventory Management System</title>
+    <title>Categories - Inventory Management System</title>
     <link rel="stylesheet" href="css/style.css?v=<?php echo time(); ?>">
     <!-- FontAwesome for icons -->
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
@@ -132,51 +89,48 @@ $branches = $branchesStmt->fetchAll();
             border-radius: 20px;
             box-shadow: 0 15px 30px rgba(0, 0, 0, 0.2);
         }
-        .custom-select {
-            appearance: none;
-            -webkit-appearance: none;
-            background: rgba(255, 255, 255, 0.04) url("data:image/svg+xml;utf8,<svg fill='white' height='24' viewBox='0 0 24 24' width='24' xmlns='http://www.w3.org/2000/svg'><path d='M7 10l5 5 5-5z'/><path d='M0 0h24v24H0z' fill='none'/></svg>") no-repeat right 12px center;
-            background-size: 20px;
-            padding-right: 40px;
-        }
-        .custom-select option {
-            background-color: #121421;
-            color: #ffffff;
-        }
         /* Custom Table Styling */
         .table-responsive {
             overflow-x: auto;
             margin-top: 1rem;
         }
-        .branch-table {
+        .category-table {
             width: 100%;
             border-collapse: collapse;
             text-align: left;
             font-size: 0.95rem;
         }
-        .branch-table th {
+        .category-table th {
             padding: 1rem;
             border-bottom: 2px solid var(--panel-border);
             color: var(--accent-color);
             font-weight: 600;
         }
-        .branch-table td {
+        .category-table td {
             padding: 1rem;
             border-bottom: 1px solid rgba(255, 255, 255, 0.05);
             color: var(--text-primary);
         }
-        .branch-table tr:hover td {
+        .category-table tr:hover td {
             background: rgba(255, 255, 255, 0.02);
         }
-        .company-badge {
+        .badge {
             display: inline-block;
             padding: 0.25rem 0.6rem;
-            background: rgba(99, 102, 241, 0.15);
-            border: 1px solid rgba(99, 102, 241, 0.3);
             border-radius: 8px;
             font-size: 0.8rem;
             font-weight: 500;
+        }
+        .item-count-badge {
+            background: rgba(99, 102, 241, 0.15);
+            border: 1px solid rgba(99, 102, 241, 0.3);
             color: #a5b4fc;
+        }
+        .stock-count-badge {
+            background: rgba(168, 85, 247, 0.15);
+            border: 1px solid rgba(168, 85, 247, 0.3);
+            color: #d8b4fe;
+            font-weight: 600;
         }
     </style>
 </head>
@@ -216,12 +170,12 @@ $branches = $branchesStmt->fetchAll();
                     </a>
                 </li>
                 <li>
-                    <a href="categories.php" class="sidebar-item-link">
+                    <a href="categories.php" class="sidebar-item-link active">
                         <i class="fa-solid fa-tags"></i> <span>Categories</span>
                     </a>
                 </li>
                 <li>
-                    <a href="branches.php" class="sidebar-item-link active">
+                    <a href="branches.php" class="sidebar-item-link">
                         <i class="fa-solid fa-store"></i> <span>Branches</span>
                     </a>
                 </li>
@@ -246,18 +200,12 @@ $branches = $branchesStmt->fetchAll();
 
         <!-- Main Workspace Area -->
         <main class="main-content">
-            <div class="main-content-header">
+            <div class="main-content-header" style="margin-bottom: 2rem;">
                 <div>
-                    <h2 style="margin-bottom: 0.25rem;">Branch Management</h2>
-                    <p class="subtitle" style="margin-bottom: 0;">Add and organize branches across Monik companies</p>
+                    <h2 style="margin-bottom: 0.25rem;">Inventory Categories</h2>
+                    <p class="subtitle" style="margin-bottom: 0;">Add new classes and view statistics of warehouse items</p>
                 </div>
             </div>
-
-            <?php if(isset($migrationError)): ?>
-                <div class="alert alert-error" style="width:100%;">
-                    <?php echo htmlspecialchars($migrationError); ?>
-                </div>
-            <?php endif; ?>
 
             <?php if(!empty($message)): ?>
                 <div class="alert alert-<?php echo $messageType; ?>" style="width:100%;">
@@ -266,67 +214,56 @@ $branches = $branchesStmt->fetchAll();
             <?php endif; ?>
 
             <div class="split-container">
-                <!-- Add Branch Form Panel -->
+                <!-- Add Category Form Panel -->
                 <div class="form-panel">
-                    <h3 style="font-size: 1.25rem; margin-bottom: 1.5rem; color: var(--text-primary);">Create Sub-Branch</h3>
+                    <h3 style="font-size: 1.2rem; margin-bottom: 1.25rem; color: var(--text-primary);"><i class="fa-solid fa-folder-plus" style="color:var(--accent-color); margin-right:0.5rem;"></i> Add New Category</h3>
                     <form method="POST" action="">
-                        <input type="hidden" name="action" value="add_branch">
+                        <input type="hidden" name="action" value="add_category">
                         
                         <div class="form-group">
-                            <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Select Company</label>
-                            <select name="company_id" class="form-control custom-select" required>
-                                <option value="" disabled selected>Choose a company...</option>
-                                <?php foreach($companies as $company): ?>
-                                    <option value="<?php echo $company['id']; ?>"><?php echo htmlspecialchars($company['name']); ?></option>
-                                <?php endforeach; ?>
-                            </select>
+                            <label style="display:block; margin-bottom:0.5rem; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Category Name</label>
+                            <input type="text" name="category_name" class="form-control" placeholder="e.g. SIM, Diary, Jacket" required style="padding: 0.8rem 1rem;">
                         </div>
 
-                        <div class="form-group">
-                            <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Branch Name</label>
-                            <input type="text" name="branch_name" class="form-control" placeholder="e.g. Colombo Head Office" required>
-                        </div>
-
-                        <div class="form-group">
-                            <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Branch Address</label>
-                            <input type="text" name="branch_address" class="form-control" placeholder="e.g. No 12, Galle Road, Colombo" required>
-                        </div>
-
-                        <button type="submit" class="btn-primary" style="margin-top: 1rem;">Add Branch</button>
+                        <button type="submit" class="btn-primary" style="margin-top: 1rem; padding: 0.8rem;">Add Category</button>
                     </form>
                 </div>
 
-                <!-- Branch Directory Panel -->
+                <!-- Categories Directory Panel -->
                 <div class="list-panel">
-                    <h3 style="font-size: 1.25rem; margin-bottom: 0.5rem; color: var(--text-primary);">Branch Directory</h3>
-                    <p style="font-size: 0.85rem; color: var(--text-secondary);">Currently registered branches inside the system</p>
+                    <h3 style="font-size: 1.2rem; margin-bottom: 0.5rem; color: var(--text-primary);">Categories Directory</h3>
+                    <p style="font-size: 0.85rem; color: var(--text-secondary);">Currently registered inventory item categories</p>
                     
                     <div class="table-responsive">
-                        <?php if(count($branches) > 0): ?>
-                            <table class="branch-table">
+                        <?php if (count($categories) > 0): ?>
+                            <table class="category-table">
                                 <thead>
                                     <tr>
-                                        <th>Company</th>
-                                        <th>Branch Name</th>
-                                        <th>Address</th>
+                                        <th>ID</th>
+                                        <th>Category Name</th>
+                                        <th>Registered Item Types</th>
+                                        <th>Total Stock Quantity</th>
                                     </tr>
                                 </thead>
                                 <tbody>
-                                    <?php foreach($branches as $branch): ?>
+                                    <?php foreach ($categories as $cat): ?>
                                         <tr>
+                                            <td style="font-weight:700; color:var(--text-secondary);">#<?php echo $cat['id']; ?></td>
+                                            <td style="font-weight:600; color:#ffffff;"><?php echo htmlspecialchars($cat['name']); ?></td>
                                             <td>
-                                                <span class="company-badge"><?php echo htmlspecialchars($branch['company_name']); ?></span>
+                                                <span class="badge item-count-badge"><?php echo $cat['total_items']; ?> Items</span>
                                             </td>
-                                            <td style="font-weight:600;"><?php echo htmlspecialchars($branch['branch_name']); ?></td>
-                                            <td style="font-size:0.9rem; color:var(--text-secondary);"><?php echo htmlspecialchars($branch['address']); ?></td>
+                                            <td>
+                                                <span class="badge stock-count-badge"><?php echo $cat['total_quantity']; ?> Units</span>
+                                            </td>
                                         </tr>
                                     <?php endforeach; ?>
                                 </tbody>
                             </table>
                         <?php else: ?>
                             <p style="text-align:center; padding: 3rem 0; color:var(--text-secondary);">
-                                <i class="fa-solid fa-store-slash" style="font-size: 2.5rem; display:block; margin-bottom:1rem; color: rgba(255,255,255,0.1);"></i>
-                                No branches registered yet.
+                                <i class="fa-solid fa-tags" style="font-size: 2.5rem; display:block; margin-bottom:0.75rem; color: rgba(255,255,255,0.1);"></i>
+                                No categories found.
                             </p>
                         <?php endif; ?>
                     </div>
@@ -335,6 +272,7 @@ $branches = $branchesStmt->fetchAll();
         </main>
     </div>
 
+    <!-- JavaScript to handle sidebar collapse -->
     <script>
         document.addEventListener("DOMContentLoaded", function() {
             const toggleBtn = document.getElementById("sidebar-toggle");
@@ -343,7 +281,6 @@ $branches = $branchesStmt->fetchAll();
             if (localStorage.getItem("sidebar-collapsed") === "true") {
                 sidebar.classList.add("collapsed");
             }
-            
             if (toggleBtn) {
                 toggleBtn.addEventListener("click", function() {
                     sidebar.classList.toggle("collapsed");

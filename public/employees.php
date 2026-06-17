@@ -9,8 +9,65 @@ $auth = new Auth($db);
 // Secure page access
 $auth->restrictToLoggedIn();
 
+// AJAX Autocomplete Suggestions Handler
+if (isset($_GET['action']) && $_GET['action'] == 'suggest_employees' && isset($_GET['q'])) {
+    header('Content-Type: application/json');
+    $q = trim($_GET['q']);
+    $suggestions = [];
+    if (strlen($q) >= 2) {
+        $suggestQuery = "SELECT e.emp_no, e.calling_name, e.full_name, e.designation 
+                         FROM employees e 
+                         WHERE e.emp_no LIKE :q 
+                            OR e.full_name LIKE :q 
+                            OR e.calling_name LIKE :q 
+                            OR e.designation LIKE :q 
+                            OR e.nic_number LIKE :q
+                         LIMIT 8";
+        $suggestStmt = $db->prepare($suggestQuery);
+        $suggestStmt->execute([':q' => "%$q%"]);
+        $suggestions = $suggestStmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+    echo json_encode($suggestions);
+    exit;
+}
+
+// AJAX Update Employee Status Handler
+if (isset($_POST['action']) && $_POST['action'] == 'update_employee_status' && isset($_POST['employee_id']) && isset($_POST['status'])) {
+    header('Content-Type: application/json');
+    $empId = intval($_POST['employee_id']);
+    $status = trim($_POST['status']);
+    
+    $success = false;
+    $message = "Invalid parameters.";
+    
+    if ($empId > 0 && ($status == 'Active' || $status == 'Inactive')) {
+        $updateStmt = $db->prepare("UPDATE employees SET status = :status WHERE id = :id");
+        $success = $updateStmt->execute([':status' => $status, ':id' => $empId]);
+        $message = $success ? "Employee status updated successfully." : "Failed to update employee status.";
+    }
+    echo json_encode(['success' => $success, 'message' => $message]);
+    exit;
+}
+
 $userId = $_SESSION['user_id'];
 $user = $auth->getUserDetails($userId);
+
+// Fetch bulk import notifications
+$importSuccessMessage = "";
+if (isset($_SESSION['import_success'])) {
+    $count = $_SESSION['import_success'];
+    if ($count > 0) {
+        $importSuccessMessage = "Successfully imported {$count} employees.";
+    }
+    unset($_SESSION['import_success']);
+}
+
+$importErrors = [];
+if (isset($_SESSION['import_errors'])) {
+    $importErrors = $_SESSION['import_errors'];
+    unset($_SESSION['import_errors']);
+}
+
 
 // Database Migration for Employees and Issued Items
 try {
@@ -26,9 +83,17 @@ try {
         nic_number VARCHAR(50) NOT NULL UNIQUE,
         mobile_number VARCHAR(20) NOT NULL,
         mail_address VARCHAR(100) NOT NULL,
+        status VARCHAR(20) NOT NULL DEFAULT 'Active',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;");
+
+    // Add status column if it does not exist
+    try {
+        $db->exec("ALTER TABLE employees ADD COLUMN status VARCHAR(20) NOT NULL DEFAULT 'Active'");
+    } catch (PDOException $ex) {
+        // Ignored if column already exists
+    }
 
     // Create issued_items table
     $db->exec("CREATE TABLE IF NOT EXISTS issued_items (
@@ -281,6 +346,8 @@ $employees = $dataStmt->fetchAll();
             border-radius: 16px;
             margin-bottom: 2rem;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.15);
+            position: relative;
+            z-index: 100;
         }
         .filter-form {
             display: flex;
@@ -341,7 +408,7 @@ $employees = $dataStmt->fetchAll();
             display: flex;
         }
         .modal-content {
-            background: #151726;
+            background: var(--panel-bg);
             border: 1px solid var(--panel-border);
             padding: 2.5rem;
             border-radius: 24px;
@@ -417,6 +484,16 @@ $employees = $dataStmt->fetchAll();
             border: 1px solid rgba(168, 85, 247, 0.3);
             color: #d8b4fe;
         }
+        .status-badge-active {
+            background: rgba(16, 185, 129, 0.15);
+            border: 1px solid rgba(16, 185, 129, 0.3);
+            color: #34d399;
+        }
+        .status-badge-inactive {
+            background: rgba(239, 68, 68, 0.15);
+            border: 1px solid rgba(239, 68, 68, 0.3);
+            color: #fca5a5;
+        }
         .clickable-name {
             cursor: pointer;
             text-decoration: underline;
@@ -425,6 +502,30 @@ $employees = $dataStmt->fetchAll();
         }
         .clickable-name:hover {
             color: #a5b4fc;
+        }
+        
+        /* Autocomplete suggestions popup styling */
+        .suggestion-item {
+            padding: 0.75rem 1rem;
+            cursor: pointer;
+            border-bottom: 1px solid var(--panel-border);
+            display: flex;
+            flex-direction: column;
+            gap: 0.25rem;
+            transition: background 0.2s ease;
+            background: var(--panel-bg);
+        }
+        .suggestion-item:hover {
+            background: rgba(255, 255, 255, 0.08);
+        }
+        .suggestion-text-main {
+            font-weight: 600;
+            color: var(--text-primary);
+            font-size: 0.9rem;
+        }
+        .suggestion-text-sub {
+            font-size: 0.75rem;
+            color: var(--text-secondary);
         }
         .btn-issue {
             padding: 0.4rem 0.75rem;
@@ -501,6 +602,18 @@ $employees = $dataStmt->fetchAll();
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li class="sidebar-submenu-container">
+                    <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
+                        <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron" style="margin-left:auto; font-size: 0.8rem;"></i>
+                    </a>
+                    <ul class="sidebar-submenu" id="doc-mgmt-submenu">
+                        <li>
+                            <a href="loan_applications.php" class="sidebar-item-link" id="loan-app-link">
+                                <i class="fa-solid fa-hand-holding-dollar"></i> <span>Loan Application</span>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
             </ul>
 
             <div class="sidebar-footer">
@@ -528,9 +641,14 @@ $employees = $dataStmt->fetchAll();
                     <h2 style="margin-bottom: 0.25rem;">Employee Registry</h2>
                     <p class="subtitle" style="margin-bottom: 0;">Organize and filter staff members across Monik companies</p>
                 </div>
-                <button id="open-modal-btn" class="btn-primary" style="width: auto; padding: 0.85rem 1.75rem; display: inline-flex; align-items: center; gap: 0.5rem; margin-top:0;">
-                    <i class="fa-solid fa-user-plus"></i> Add Employee
-                </button>
+                <div style="display: flex; gap: 0.75rem;">
+                    <button id="open-import-btn" class="btn-profile" style="padding: 0.85rem 1.75rem; display: inline-flex; align-items: center; gap: 0.5rem; margin-top:0; border-radius: 12px; cursor: pointer; border: none; font-weight: 600; font-size: 0.95rem; background: linear-gradient(135deg, #10b981 0%, #059669 100%); box-shadow: 0 4px 12px rgba(16, 185, 129, 0.3);">
+                        <i class="fa-solid fa-file-import"></i> Import Employees
+                    </button>
+                    <button id="open-modal-btn" class="btn-primary" style="width: auto; padding: 0.85rem 1.75rem; display: inline-flex; align-items: center; gap: 0.5rem; margin-top:0;">
+                        <i class="fa-solid fa-user-plus"></i> Add Employee
+                    </button>
+                </div>
             </div>
 
             <?php if(isset($migrationError)): ?>
@@ -545,12 +663,32 @@ $employees = $dataStmt->fetchAll();
                 </div>
             <?php endif; ?>
 
+            <?php if(!empty($importSuccessMessage)): ?>
+                <div class="alert alert-success" style="width:100%; display:flex; align-items:center; gap:0.5rem;">
+                    <i class="fa-solid fa-circle-check"></i> <?php echo htmlspecialchars($importSuccessMessage); ?>
+                </div>
+            <?php endif; ?>
+
+            <?php if(!empty($importErrors)): ?>
+                <div class="alert alert-error" style="width:100%; display:block;">
+                    <div style="font-weight:700; margin-bottom:0.5rem; display:flex; align-items:center; gap:0.5rem;">
+                        <i class="fa-solid fa-triangle-exclamation"></i> Bulk Import Warnings / Errors:
+                    </div>
+                    <ul style="margin: 0; padding-left: 1.25rem; font-size: 0.9rem; line-height: 1.5; text-align: left;">
+                        <?php foreach($importErrors as $err): ?>
+                            <li><?php echo htmlspecialchars($err); ?></li>
+                        <?php endforeach; ?>
+                    </ul>
+                </div>
+            <?php endif; ?>
+
             <!-- Filtration / Search Row -->
             <div class="filter-panel">
                 <form method="GET" action="" class="filter-form">
-                    <div style="flex: 2 1 200px;">
+                    <div style="flex: 2 1 200px; position: relative;">
                         <label style="display:block; margin-bottom:0.5rem; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Search Keyword</label>
-                        <input type="text" name="search" class="form-control" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search by EMP NO, name, designation, NIC...">
+                        <input type="text" name="search" id="search-keyword-input" class="form-control" value="<?php echo htmlspecialchars($search); ?>" placeholder="Search by EMP NO, name, designation, NIC..." autocomplete="off">
+                        <div id="search-suggestions" style="display:none; position:absolute; top:100%; left:0; right:0; background:var(--panel-bg); border:1px solid var(--panel-border); border-radius:12px; box-shadow:0 10px 25px rgba(0,0,0,0.3); z-index:2100; max-height:250px; overflow-y:auto; margin-top:5px;"></div>
                     </div>
                     <div style="flex: 1 1 150px;">
                         <label style="display:block; margin-bottom:0.5rem; font-size:0.85rem; color:var(--text-secondary); font-weight:600;">Company Filter</label>
@@ -603,6 +741,7 @@ $employees = $dataStmt->fetchAll();
                                     <th>Mobile</th>
                                     <th>Email</th>
                                     <th>Join Date</th>
+                                    <th>Status</th>
                                     <th style="text-align: center;">Actions</th>
                                 </tr>
                             </thead>
@@ -610,7 +749,7 @@ $employees = $dataStmt->fetchAll();
                                 <?php foreach($employees as $emp): ?>
                                     <tr>
                                         <td style="font-weight:700; color: var(--accent-color);"><?php echo htmlspecialchars($emp['emp_no']); ?></td>
-                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>">
+                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>" data-status="<?php echo htmlspecialchars($emp['status']); ?>">
                                             <strong><?php echo htmlspecialchars($emp['calling_name']); ?></strong>
                                         </td>
                                         <td style="color:var(--text-secondary);"><?php echo htmlspecialchars($emp['full_name']); ?></td>
@@ -626,6 +765,11 @@ $employees = $dataStmt->fetchAll();
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['mobile_number']); ?></td>
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['mail_address']); ?></td>
                                         <td style="font-size:0.85rem; color: var(--text-secondary);"><?php echo htmlspecialchars($emp['joining_date']); ?></td>
+                                        <td>
+                                            <span class="badge status-badge-<?php echo strtolower($emp['status']); ?>">
+                                                <?php echo htmlspecialchars($emp['status']); ?>
+                                            </span>
+                                        </td>
                                         <td style="text-align: center;">
                                             <button class="btn-issue open-issue-btn" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>">
                                                 <i class="fa-solid fa-hand-holding"></i> Issue Item
@@ -740,6 +884,32 @@ $employees = $dataStmt->fetchAll();
         </div>
     </div>
 
+    <!-- Import Employees Modal -->
+    <div id="import-employees-modal" class="modal">
+        <div class="modal-content" style="max-width: 500px;">
+            <span class="close-btn" id="close-import-modal-btn">&times;</span>
+            <h3 style="font-size: 1.35rem; margin-bottom: 1.5rem; color: var(--text-primary); border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem;">Import Employees</h3>
+            
+            <div style="margin-bottom: 1.5rem; background: rgba(255, 255, 255, 0.02); padding: 1rem; border-radius: 12px; border: 1px solid var(--panel-border);">
+                <p style="font-size: 0.85rem; color: var(--text-secondary); margin-bottom: 0.75rem; line-height: 1.4;">
+                    Upload an Excel file (<code>.xlsx</code>) or CSV file containing employee details. Ensure your columns match the template structure.
+                </p>
+                <a href="download_template.php" class="btn-profile" style="padding: 0.5rem 1rem; font-size: 0.8rem; display: inline-flex; align-items: center; gap: 0.35rem; text-decoration: none; border-radius: 8px; font-weight: 600;">
+                    <i class="fa-solid fa-download"></i> Download Template (CSV)
+                </a>
+            </div>
+
+            <form method="POST" action="import_employees.php" enctype="multipart/form-data">
+                <div class="form-group">
+                    <label style="display:block; margin-bottom:0.5rem; font-size:0.9rem; color:var(--text-secondary); font-weight:600;">Select Excel/CSV File</label>
+                    <input type="file" name="import_file" accept=".xlsx, .csv" class="form-control" required style="padding: 0.6rem 0.8rem;">
+                </div>
+
+                <button type="submit" class="btn-primary" style="margin-top: 1.5rem; padding: 0.8rem;">Start Import</button>
+            </form>
+        </div>
+    </div>
+
     <!-- Issue Inventory Item Modal -->
     <div id="issue-item-modal" class="modal">
         <div class="modal-content" style="max-width: 500px;">
@@ -818,6 +988,13 @@ $employees = $dataStmt->fetchAll();
                     <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Contact Details</span>
                     <span id="view-emp-contact" style="color:#ffffff; font-size:0.85rem; display:block;"></span>
                 </div>
+                <div>
+                    <span style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom:0.25rem;">Status</span>
+                    <select id="view-emp-status-select" class="form-control" style="padding: 0.35rem 0.5rem; font-size: 0.85rem; border-radius: 8px; width: 120px; display: block; background: var(--input); color: var(--text-primary); border: 1px solid var(--panel-border); font-weight: 600;">
+                        <option value="Active" style="background-color: var(--panel-bg); color:#34d399;">Active</option>
+                        <option value="Inactive" style="background-color: var(--panel-bg); color:#fca5a5;">Inactive</option>
+                    </select>
+                </div>
             </div>
 
             <!-- Issued Items Table -->
@@ -861,11 +1038,14 @@ $employees = $dataStmt->fetchAll();
             const addModal = document.getElementById("add-employee-modal");
             const issueModal = document.getElementById("issue-item-modal");
             const viewModal = document.getElementById("view-employee-modal");
+            const importModal = document.getElementById("import-employees-modal");
             
             const openAddBtn = document.getElementById("open-modal-btn");
             const closeAddBtn = document.getElementById("close-add-modal-btn");
             const closeIssueBtn = document.getElementById("close-issue-modal-btn");
             const closeViewBtn = document.getElementById("close-view-modal-btn");
+            const openImportBtn = document.getElementById("open-import-btn");
+            const closeImportBtn = document.getElementById("close-import-modal-btn");
 
             // Open Add Modal
             if (openAddBtn) {
@@ -873,6 +1053,14 @@ $employees = $dataStmt->fetchAll();
             }
             if (closeAddBtn) {
                 closeAddBtn.addEventListener("click", () => addModal.classList.remove("show"));
+            }
+
+            // Open Import Modal
+            if (openImportBtn) {
+                openImportBtn.addEventListener("click", () => importModal.classList.add("show"));
+            }
+            if (closeImportBtn) {
+                closeImportBtn.addEventListener("click", () => importModal.classList.remove("show"));
             }
 
             // Close Modals
@@ -888,6 +1076,7 @@ $employees = $dataStmt->fetchAll();
                 if (event.target === addModal) addModal.classList.remove("show");
                 if (event.target === issueModal) issueModal.classList.remove("show");
                 if (event.target === viewModal) viewModal.classList.remove("show");
+                if (event.target === importModal) importModal.classList.remove("show");
             });
 
             // Elements for category filter in Issue Stock modal
@@ -974,6 +1163,13 @@ $employees = $dataStmt->fetchAll();
                     document.getElementById("view-emp-nic").textContent = this.dataset.nic;
                     document.getElementById("view-emp-contact").innerHTML = '<i class="fa-solid fa-phone"></i> ' + this.dataset.mobile + '<br><i class="fa-solid fa-envelope"></i> ' + this.dataset.email;
                     
+                    // Set status in select dropdown
+                    const statusSelect = document.getElementById("view-emp-status-select");
+                    if (statusSelect) {
+                        statusSelect.value = this.dataset.status || "Active";
+                        statusSelect.dataset.id = empId;
+                    }
+                    
                     // Clear and load dynamic issued items via AJAX
                     const tbody = document.getElementById("view-issued-tbody");
                     tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 1.5rem 0; color:var(--text-secondary);">Loading issued items...</td></tr>';
@@ -1005,6 +1201,51 @@ $employees = $dataStmt->fetchAll();
                         });
                 });
             });
+
+            // Listen to Status Change in View Modal
+            const statusSelect = document.getElementById("view-emp-status-select");
+            if (statusSelect) {
+                statusSelect.addEventListener("change", function() {
+                    const empId = this.dataset.id;
+                    const newStatus = this.value;
+                    
+                    if (empId) {
+                        const formData = new FormData();
+                        formData.append("action", "update_employee_status");
+                        formData.append("employee_id", empId);
+                        formData.append("status", newStatus);
+                        
+                        fetch("employees.php", {
+                            method: "POST",
+                            body: formData
+                        })
+                        .then(response => response.json())
+                        .then(data => {
+                            if (data.success) {
+                                // Update status data attribute on the clickable element
+                                const nameCell = document.querySelector(`.clickable-name[data-id="${empId}"]`);
+                                if (nameCell) {
+                                    nameCell.dataset.status = newStatus;
+                                    const row = nameCell.closest("tr");
+                                    if (row) {
+                                        const badgeCell = row.querySelector("span.badge[class*='status-badge-']");
+                                        if (badgeCell) {
+                                            badgeCell.className = `badge status-badge-${newStatus.toLowerCase()}`;
+                                            badgeCell.textContent = newStatus;
+                                        }
+                                    }
+                                }
+                            } else {
+                                alert("Error updating status: " + data.message);
+                            }
+                        })
+                        .catch(err => {
+                            console.error("Error updating employee status:", err);
+                            alert("Failed to update status. Please try again.");
+                        });
+                    }
+                });
+            }
 
             // Helper to escape HTML safely in JS
             function escapeHtml(text) {
@@ -1100,6 +1341,110 @@ $employees = $dataStmt->fetchAll();
                     } else {
                         filterBranchSelect.disabled = true;
                     }
+                });
+            }
+
+            // Autocomplete Search Suggestion Logic
+            const searchInput = document.getElementById("search-keyword-input");
+            const suggestionsContainer = document.getElementById("search-suggestions");
+            let debounceTimeout = null;
+
+            if (searchInput && suggestionsContainer) {
+                searchInput.addEventListener("input", function() {
+                    clearTimeout(debounceTimeout);
+                    const query = this.value.trim();
+
+                    if (query.length < 2) {
+                        suggestionsContainer.innerHTML = "";
+                        suggestionsContainer.style.display = "none";
+                        return;
+                    }
+
+                    debounceTimeout = setTimeout(() => {
+                        fetch(`employees.php?action=suggest_employees&q=${encodeURIComponent(query)}`)
+                            .then(response => response.json())
+                            .then(data => {
+                                suggestionsContainer.innerHTML = "";
+                                if (data.length > 0) {
+                                    data.forEach(emp => {
+                                        const item = document.createElement("div");
+                                        item.className = "suggestion-item";
+                                        
+                                        const mainText = document.createElement("div");
+                                        mainText.className = "suggestion-text-main";
+                                        mainText.textContent = `${emp.calling_name} (${emp.emp_no})`;
+                                        
+                                        const subText = document.createElement("div");
+                                        subText.className = "suggestion-text-sub";
+                                        subText.textContent = `${emp.full_name} - ${emp.designation}`;
+                                        
+                                        item.appendChild(mainText);
+                                        item.appendChild(subText);
+                                        
+                                        item.addEventListener("click", function() {
+                                            searchInput.value = emp.emp_no;
+                                            suggestionsContainer.innerHTML = "";
+                                            suggestionsContainer.style.display = "none";
+                                            // Find the parent form and submit it
+                                            const form = searchInput.closest("form");
+                                            if (form) {
+                                                form.submit();
+                                            }
+                                        });
+                                        
+                                        suggestionsContainer.appendChild(item);
+                                    });
+                                    suggestionsContainer.style.display = "block";
+                                } else {
+                                    suggestionsContainer.style.display = "none";
+                                }
+                            })
+                            .catch(err => {
+                                console.error("Error fetching suggestions:", err);
+                            });
+                    }, 300);
+                });
+
+                // Hide suggestions when clicking outside
+                document.addEventListener("click", function(e) {
+                    if (!searchInput.contains(e.target) && !suggestionsContainer.contains(e.target)) {
+                        suggestionsContainer.style.display = "none";
+                    }
+                });
+
+                // Pressing Escape hides suggestions
+                searchInput.addEventListener("keydown", function(e) {
+                    if (e.key === "Escape") {
+                        suggestionsContainer.style.display = "none";
+                    }
+                });
+
+                // Show suggestions on focus if query length >= 2
+                searchInput.addEventListener("focus", function() {
+                    const query = this.value.trim();
+                    if (query.length >= 2 && suggestionsContainer.children.length > 0) {
+                        suggestionsContainer.style.display = "block";
+                    }
+                });
+            }
+
+            // Submenu toggle logic
+            const docMgmtToggle = document.getElementById("doc-mgmt-toggle");
+            const docMgmtSubmenu = document.getElementById("doc-mgmt-submenu");
+            const submenuChevron = document.querySelector(".submenu-chevron");
+
+            // Load submenu state
+            if (localStorage.getItem("doc-mgmt-open") === "true") {
+                docMgmtSubmenu.classList.add("show");
+                if (submenuChevron) submenuChevron.classList.add("rotate");
+            }
+
+            if (docMgmtToggle) {
+                docMgmtToggle.addEventListener("click", function(e) {
+                    e.preventDefault();
+                    docMgmtSubmenu.classList.toggle("show");
+                    if (submenuChevron) submenuChevron.classList.toggle("rotate");
+                    localStorage.setItem("doc-mgmt-open", docMgmtSubmenu.classList.contains("show"));
                 });
             }
         });

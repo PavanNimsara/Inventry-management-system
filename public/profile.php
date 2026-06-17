@@ -200,6 +200,18 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li class="sidebar-submenu-container">
+                    <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
+                        <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron" style="margin-left:auto; font-size: 0.8rem;"></i>
+                    </a>
+                    <ul class="sidebar-submenu" id="doc-mgmt-submenu">
+                        <li>
+                            <a href="loan_applications.php" class="sidebar-item-link" id="loan-app-link">
+                                <i class="fa-solid fa-hand-holding-dollar"></i> <span>Loan Application</span>
+                            </a>
+                        </li>
+                    </ul>
+                </li>
             </ul>
 
             <div class="sidebar-footer">
@@ -301,6 +313,26 @@ if ($_SERVER["REQUEST_METHOD"] == "POST") {
                 toggleBtn.addEventListener("click", function() {
                     sidebar.classList.toggle("collapsed");
                     localStorage.setItem("sidebar-collapsed", sidebar.classList.contains("collapsed"));
+                });
+            }
+
+            // Submenu toggle logic
+            const docMgmtToggle = document.getElementById("doc-mgmt-toggle");
+            const docMgmtSubmenu = document.getElementById("doc-mgmt-submenu");
+            const submenuChevron = document.querySelector(".submenu-chevron");
+
+            // Load submenu state
+            if (localStorage.getItem("doc-mgmt-open") === "true") {
+                docMgmtSubmenu.classList.add("show");
+                if (submenuChevron) submenuChevron.classList.add("rotate");
+            }
+
+            if (docMgmtToggle) {
+                docMgmtToggle.addEventListener("click", function(e) {
+                    e.preventDefault();
+                    docMgmtSubmenu.classList.toggle("show");
+                    if (submenuChevron) submenuChevron.classList.toggle("rotate");
+                    localStorage.setItem("doc-mgmt-open", docMgmtSubmenu.classList.contains("show"));
                 });
             }
         });

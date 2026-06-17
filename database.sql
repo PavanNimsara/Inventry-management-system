@@ -25,3 +25,36 @@ VALUES
 ('admin_user', 'admin@gmail.com', '$2y$10$vD7b1b3mREb62CgR1qFm/.7L6L8hC9iW4qM3aU7Iym7C1Y7vWshG6', 'admin'),
 ('regular_user', 'user@gmail.com', '$2y$10$vD7b1b3mREb62CgR1qFm/.7L6L8hC9iW4qM3aU7Iym7C1Y7vWshG6', 'user')
 ON DUPLICATE KEY UPDATE username=username;
+
+-- 5. Create loan document management tables
+CREATE TABLE IF NOT EXISTS loan_document_inventory (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category VARCHAR(50) NOT NULL,
+    doc_type VARCHAR(50) NOT NULL,
+    language VARCHAR(50) NOT NULL,
+    quantity INT DEFAULT 0,
+    last_updated DATE NOT NULL,
+    UNIQUE KEY (category, doc_type, language)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS loan_document_additions (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    category VARCHAR(50) NOT NULL,
+    doc_type VARCHAR(50) NOT NULL,
+    language VARCHAR(50) NOT NULL,
+    quantity INT NOT NULL,
+    addition_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS loan_document_issuances (
+    id INT AUTO_INCREMENT PRIMARY KEY,
+    branch_id INT NOT NULL,
+    category VARCHAR(50) NOT NULL,
+    doc_type VARCHAR(50) NOT NULL,
+    language VARCHAR(50) NOT NULL,
+    quantity INT NOT NULL,
+    issue_date DATE NOT NULL,
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+    FOREIGN KEY (branch_id) REFERENCES branches(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;

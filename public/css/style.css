@@ -607,4 +607,33 @@ a:hover {
     display: none !important;
 }
 
+/* Sidebar Submenu Styling */
+.sidebar-submenu {
+    list-style: none;
+    padding-left: 1.5rem;
+    margin-top: 0.25rem;
+    display: none;
+    flex-direction: column;
+    gap: 0.25rem;
+}
+.sidebar-submenu.show {
+    display: flex;
+}
+.sidebar.collapsed .sidebar-submenu {
+    display: none !important;
+}
+.sidebar-submenu .sidebar-item-link {
+    padding: 0.65rem 1rem;
+    font-size: 0.9rem;
+}
+.submenu-chevron {
+    transition: transform 0.3s;
+}
+.submenu-chevron.rotate {
+    transform: rotate(180deg);
+}
+
+
+
+
 

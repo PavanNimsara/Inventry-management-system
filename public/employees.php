@@ -49,6 +49,125 @@ if (isset($_POST['action']) && $_POST['action'] == 'update_employee_status' && i
     exit;
 }
 
+// AJAX Update Employee Details Handler
+if (isset($_POST['action']) && $_POST['action'] == 'update_employee_details' && isset($_POST['employee_id'])) {
+    header('Content-Type: application/json');
+    $empId = intval($_POST['employee_id']);
+    
+    $emp_no = trim($_POST['emp_no'] ?? '');
+    $full_name = trim($_POST['full_name'] ?? '');
+    $calling_name = trim($_POST['calling_name'] ?? '');
+    $designation = trim($_POST['designation'] ?? '');
+    $branch_id = intval($_POST['branch_id'] ?? 0);
+    $nic_number = trim($_POST['nic_number'] ?? '');
+    $mobile_number = trim($_POST['mobile_number'] ?? '');
+    $mail_address = trim($_POST['mail_address'] ?? '');
+    $joining_date = trim($_POST['joining_date'] ?? '');
+    
+    $success = false;
+    $message = "Please fill in all the fields.";
+    
+    if (
+        $empId > 0 && !empty($emp_no) && !empty($full_name) && !empty($calling_name) && 
+        !empty($designation) && $branch_id > 0 && !empty($nic_number) && 
+        !empty($mobile_number) && !empty($mail_address) && !empty($joining_date)
+    ) {
+        try {
+            // Check company prefix matching
+            $compQuery = "SELECT c.name FROM branches b INNER JOIN companies c ON b.company_id = c.id WHERE b.id = :branch_id LIMIT 1";
+            $compStmt = $db->prepare($compQuery);
+            $compStmt->execute([':branch_id' => $branch_id]);
+            $companyName = $compStmt->fetchColumn();
+            
+            $companyPrefixes = [
+                "Commercial Micro Credit" => "CMC",
+                "Monik International Pvt Ltd" => "MNK",
+                "Ceylon Monik Building Society Limited" => "CMB",
+                "Monik Homes Pvt Ltd" => "MNH",
+                "Monik Water Pvt Ltd" => "MNW",
+                "Monik Trading Pvt LTD" => "MNT",
+                "Monik Agro Pvt Ltd" => "MNA",
+                "Monik Land" => "MNL"
+            ];
+            $expectedPrefix = isset($companyPrefixes[$companyName]) ? $companyPrefixes[$companyName] : '';
+            
+            if ($expectedPrefix && strpos($emp_no, $expectedPrefix) !== 0) {
+                $message = "EMP NO mismatch. For $companyName, the employee prefix must match '$expectedPrefix'. Please update Employee details accordingly.";
+                $success = false;
+            } else {
+                $updateQuery = "UPDATE employees SET 
+                                    emp_no = :emp_no,
+                                    full_name = :full_name, 
+                                    calling_name = :calling_name, 
+                                    designation = :designation, 
+                                    branch_id = :branch_id, 
+                                    nic_number = :nic_number, 
+                                    mobile_number = :mobile_number, 
+                                    mail_address = :mail_address, 
+                                    joining_date = :joining_date 
+                                WHERE id = :id";
+                $updateStmt = $db->prepare($updateQuery);
+                $success = $updateStmt->execute([
+                    ':emp_no' => $emp_no,
+                    ':full_name' => $full_name,
+                    ':calling_name' => $calling_name,
+                    ':designation' => $designation,
+                    ':branch_id' => $branch_id,
+                    ':nic_number' => $nic_number,
+                    ':mobile_number' => $mobile_number,
+                    ':mail_address' => $mail_address,
+                    ':joining_date' => $joining_date,
+                    ':id' => $empId
+                ]);
+                
+                if ($success) {
+                    // Fetch updated branch name and company name to return
+                    $branchInfoStmt = $db->prepare("SELECT b.name as branch_name, c.name as company_name, b.company_id FROM branches b INNER JOIN companies c ON b.company_id = c.id WHERE b.id = :branch_id LIMIT 1");
+                    $branchInfoStmt->execute([':branch_id' => $branch_id]);
+                    $branchInfo = $branchInfoStmt->fetch(PDO::FETCH_ASSOC);
+                    
+                    $message = "Employee details updated successfully!";
+                    echo json_encode([
+                        'success' => true, 
+                        'message' => $message,
+                        'data' => [
+                            'emp_no' => $emp_no,
+                            'full_name' => $full_name,
+                            'calling_name' => $calling_name,
+                            'designation' => $designation,
+                            'branch_name' => $branchInfo['branch_name'],
+                            'company_name' => $branchInfo['company_name'],
+                            'company_id' => $branchInfo['company_id'],
+                            'branch_id' => $branch_id,
+                            'nic_number' => $nic_number,
+                            'mobile_number' => $mobile_number,
+                            'mail_address' => $mail_address,
+                            'joining_date' => $joining_date
+                        ]
+                    ]);
+                    exit;
+                } else {
+                    $message = "Failed to update employee details.";
+                }
+            }
+        } catch (PDOException $e) {
+            if ($e->errorInfo[1] == 1062) {
+                if (strpos($e->getMessage(), 'emp_no') !== false) {
+                    $message = "Failed to update employee: EMP NO already exists.";
+                } elseif (strpos($e->getMessage(), 'nic_number') !== false) {
+                    $message = "Failed to update employee: NIC Number already exists.";
+                } else {
+                    $message = "Failed to update employee: Duplicate key error.";
+                }
+            } else {
+                $message = "Database error: " . $e->getMessage();
+            }
+        }
+    }
+    echo json_encode(['success' => $success, 'message' => $message]);
+    exit;
+}
+
 $userId = $_SESSION['user_id'];
 $user = $auth->getUserDetails($userId);
 
@@ -301,7 +420,7 @@ $total_rows = $countStmt->fetchColumn();
 $total_pages = ceil($total_rows / $limit);
 
 // Fetch paginated employees
-$dataQuery = "SELECT e.*, b.name as branch_name, c.name as company_name 
+$dataQuery = "SELECT e.*, b.name as branch_name, c.name as company_name, b.company_id 
               FROM employees e 
               INNER JOIN branches b ON e.branch_id = b.id 
               INNER JOIN companies c ON b.company_id = c.id 
@@ -602,6 +721,11 @@ $employees = $dataStmt->fetchAll();
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li>
+                    <a href="issues_history.php" class="sidebar-item-link">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span>Issues History</span>
+                    </a>
+                </li>
                 <li class="sidebar-submenu-container">
                     <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
                         <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron" style="margin-left:auto; font-size: 0.8rem;"></i>
@@ -711,8 +835,6 @@ $employees = $dataStmt->fetchAll();
                         </select>
                     </div>
                     <div style="display:flex; gap: 0.5rem;">
-                        <button type="submit" class="btn-primary" style="margin-top:0; padding: 0.85rem 1.5rem; font-size:0.95rem; width:auto; display:inline-flex; align-items:center; gap:0.5rem;"><i class="fa-solid fa-magnifying-glass"></i> Filter</button>
-                        
                         <?php 
                         $exportUrl = "export_employees.php?search=" . urlencode($search) . "&filter_company=" . $filter_company . "&filter_branch=" . $filter_branch;
                         ?>
@@ -749,7 +871,7 @@ $employees = $dataStmt->fetchAll();
                                 <?php foreach($employees as $emp): ?>
                                     <tr>
                                         <td style="font-weight:700; color: var(--accent-color);"><?php echo htmlspecialchars($emp['emp_no']); ?></td>
-                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>" data-status="<?php echo htmlspecialchars($emp['status']); ?>">
+                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-compid="<?php echo $emp['company_id']; ?>" data-branchid="<?php echo $emp['branch_id']; ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>" data-status="<?php echo htmlspecialchars($emp['status']); ?>">
                                             <strong><?php echo htmlspecialchars($emp['calling_name']); ?></strong>
                                         </td>
                                         <td style="color:var(--text-secondary);"><?php echo htmlspecialchars($emp['full_name']); ?></td>
@@ -957,13 +1079,18 @@ $employees = $dataStmt->fetchAll();
             <span class="close-btn" id="close-view-modal-btn">&times;</span>
             <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom: 1.5rem; border-bottom: 1px solid var(--panel-border); padding-bottom: 0.75rem; flex-wrap: wrap; gap: 0.75rem;">
                 <h3 style="font-size: 1.35rem; color: var(--text-primary); margin: 0;">Employee Profile & Issued Items</h3>
-                <a id="export-pdf-btn" href="#" target="_blank" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; width: auto; margin-top: 0; box-shadow: none; border-radius: 8px; margin-right: 2.2rem;">
-                    <i class="fa-solid fa-file-pdf"></i> Export PDF
-                </a>
+                <div style="display:flex; gap: 0.5rem; margin-right: 2.2rem; align-items: center;">
+                    <button id="edit-emp-btn" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; width: auto; margin-top: 0; box-shadow: none; border-radius: 8px; background: linear-gradient(135deg, #3b82f6 0%, #1d4ed8 100%);">
+                        <i class="fa-solid fa-user-pen"></i> Edit Profile
+                    </button>
+                    <a id="export-pdf-btn" href="#" target="_blank" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; display: flex; align-items: center; gap: 0.5rem; text-decoration: none; width: auto; margin-top: 0; box-shadow: none; border-radius: 8px;">
+                        <i class="fa-solid fa-file-pdf"></i> Export PDF
+                    </a>
+                </div>
             </div>
             
-            <!-- Employee Info Block -->
-            <div style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; background: rgba(255,255,255,0.02); padding: 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border);">
+            <!-- Employee Info Block (Read-only) -->
+            <div id="view-emp-info-container" style="display:grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; margin-bottom: 2rem; background: rgba(255,255,255,0.02); padding: 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border);">
                 <div>
                     <span style="display:block; font-size:0.8rem; color: var(--text-secondary);">Full Name</span>
                     <strong id="view-emp-fullname" style="color:#ffffff;"></strong>
@@ -996,6 +1123,65 @@ $employees = $dataStmt->fetchAll();
                     </select>
                 </div>
             </div>
+
+            <!-- Edit Employee Info Block (Form) -->
+            <form id="edit-employee-form" style="display:none; margin-bottom: 2rem; background: rgba(255,255,255,0.02); padding: 1.25rem; border-radius: 12px; border: 1px solid var(--panel-border);">
+                <input type="hidden" name="action" value="update_employee_details">
+                <input type="hidden" name="employee_id" id="edit-emp-id">
+                
+                <div class="form-grid" style="grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 1.25rem; max-height:none; padding-right:0; overflow-y:visible;">
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Full Name</label>
+                        <input type="text" name="full_name" id="edit-input-fullname" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Calling Name</label>
+                        <input type="text" name="calling_name" id="edit-input-callingname" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">EMP NO</label>
+                        <input type="text" name="emp_no" id="edit-input-empno" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Designation</label>
+                        <input type="text" name="designation" id="edit-input-desig" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Company</label>
+                        <select id="edit-company-select" class="form-control custom-select" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                            <?php foreach($companies as $company): ?>
+                                <option value="<?php echo $company['id']; ?>"><?php echo htmlspecialchars($company['name']); ?></option>
+                            <?php endforeach; ?>
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Branch</label>
+                        <select name="branch_id" id="edit-branch-select" class="form-control custom-select" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                            <!-- Populated dynamically -->
+                        </select>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">NIC Number</label>
+                        <input type="text" name="nic_number" id="edit-input-nic" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Mobile Number</label>
+                        <input type="text" name="mobile_number" id="edit-input-mobile" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Email Address</label>
+                        <input type="email" name="mail_address" id="edit-input-email" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                    <div>
+                        <label style="display:block; font-size:0.8rem; color: var(--text-secondary); margin-bottom: 0.25rem;">Joining Date</label>
+                        <input type="date" name="joining_date" id="edit-input-date" class="form-control" style="padding: 0.4rem 0.75rem; font-size: 0.9rem;" required>
+                    </div>
+                </div>
+                <div style="display:flex; justify-content:flex-end; gap:0.5rem; margin-top:1.25rem;">
+                    <button type="button" id="cancel-edit-btn" class="btn-logout" style="padding: 0.5rem 1rem; font-size: 0.85rem; width: auto; margin-top:0;">Cancel</button>
+                    <button type="submit" class="btn-primary" style="padding: 0.5rem 1rem; font-size: 0.85rem; width: auto; margin-top:0;">Save Changes</button>
+                </div>
+            </form>
 
             <!-- Issued Items Table -->
             <h4 style="font-size:1.1rem; color: var(--text-primary); margin-bottom: 0.75rem;">Issued Inventory Items</h4>
@@ -1152,6 +1338,14 @@ $employees = $dataStmt->fetchAll();
                 cell.addEventListener("click", function() {
                     const empId = this.dataset.id;
                     
+                    // Reset modal to View Mode (Read-only)
+                    const viewContainer = document.getElementById("view-emp-info-container");
+                    const editForm = document.getElementById("edit-employee-form");
+                    const editBtn = document.getElementById("edit-emp-btn");
+                    if (viewContainer) viewContainer.style.display = "grid";
+                    if (editForm) editForm.style.display = "none";
+                    if (editBtn) editBtn.style.display = "inline-flex";
+
                     // Set PDF export link
                     document.getElementById("export-pdf-btn").href = 'export_employee_pdf.php?employee_id=' + empId;
                     
@@ -1163,6 +1357,26 @@ $employees = $dataStmt->fetchAll();
                     document.getElementById("view-emp-nic").textContent = this.dataset.nic;
                     document.getElementById("view-emp-contact").innerHTML = '<i class="fa-solid fa-phone"></i> ' + this.dataset.mobile + '<br><i class="fa-solid fa-envelope"></i> ' + this.dataset.email;
                     
+                    // Populate Edit Form Inputs
+                    document.getElementById("edit-emp-id").value = empId;
+                    document.getElementById("edit-input-fullname").value = this.dataset.fullname;
+                    document.getElementById("edit-input-callingname").value = this.dataset.name;
+                    document.getElementById("edit-input-empno").value = this.dataset.empno;
+                    document.getElementById("edit-input-desig").value = this.dataset.desig;
+                    document.getElementById("edit-input-nic").value = this.dataset.nic;
+                    document.getElementById("edit-input-mobile").value = this.dataset.mobile;
+                    document.getElementById("edit-input-email").value = this.dataset.email;
+                    document.getElementById("edit-input-date").value = this.dataset.date;
+                    
+                    // Select company
+                    const editCompanySelect = document.getElementById("edit-company-select");
+                    if (editCompanySelect) {
+                        editCompanySelect.value = this.dataset.compid;
+                    }
+                    
+                    // Trigger branch loading for this company, then select the branch
+                    loadEditBranches(this.dataset.compid, this.dataset.branchid);
+
                     // Set status in select dropdown
                     const statusSelect = document.getElementById("view-emp-status-select");
                     if (statusSelect) {
@@ -1244,6 +1458,188 @@ $employees = $dataStmt->fetchAll();
                             alert("Failed to update status. Please try again.");
                         });
                     }
+                });
+            }
+
+            // AJAX loader for Edit Employee Form Dropdowns
+            function loadEditBranches(companyId, selectedBranchId = null) {
+                const editBranchSelect = document.getElementById("edit-branch-select");
+                if (!editBranchSelect) return Promise.resolve();
+                
+                editBranchSelect.innerHTML = '<option value="" disabled selected>Loading branches...</option>';
+                editBranchSelect.disabled = true;
+                
+                if (companyId) {
+                    return fetch('get_branches.php?company_id=' + companyId)
+                        .then(response => response.json())
+                        .then(data => {
+                            editBranchSelect.innerHTML = '<option value="" disabled selected>Select Branch...</option>';
+                            if (data.length > 0) {
+                                data.forEach(branch => {
+                                    const option = document.createElement('option');
+                                    option.value = branch.id;
+                                    option.textContent = branch.name;
+                                    if (selectedBranchId && branch.id == selectedBranchId) {
+                                        option.selected = true;
+                                    }
+                                    editBranchSelect.appendChild(option);
+                                });
+                                editBranchSelect.disabled = false;
+                            } else {
+                                editBranchSelect.disabled = true;
+                            }
+                        });
+                } else {
+                    editBranchSelect.disabled = true;
+                    return Promise.resolve();
+                }
+            }
+
+            const editCompanySelect = document.getElementById("edit-company-select");
+            if (editCompanySelect) {
+                editCompanySelect.addEventListener("change", function() {
+                    const selectedCompanyName = this.options[this.selectedIndex].text.trim();
+                    const companyPrefixes = {
+                        "Commercial Micro Credit": "CMC",
+                        "Monik International Pvt Ltd": "MNK",
+                        "Ceylon Monik Building Society Limited": "CMB",
+                        "Monik Homes Pvt Ltd": "MNH",
+                        "Monik Water Pvt Ltd": "MNW",
+                        "Monik Trading Pvt LTD": "MNT",
+                        "Monik Agro Pvt Ltd": "MNA",
+                        "Monik Land": "MNL"
+                    };
+                    const newPrefix = companyPrefixes[selectedCompanyName] || "";
+                    
+                    const empNoInput = document.getElementById("edit-input-empno");
+                    if (empNoInput) {
+                        const currentVal = empNoInput.value;
+                        const numericPart = currentVal.replace(/^[A-Z]+/, "");
+                        empNoInput.value = newPrefix + numericPart;
+                    }
+                    
+                    loadEditBranches(this.value);
+                });
+            }
+
+            // Edit / View Toggle Controls
+            const editEmpBtn = document.getElementById("edit-emp-btn");
+            const cancelEditBtn = document.getElementById("cancel-edit-btn");
+            const viewEmpContainer = document.getElementById("view-emp-info-container");
+            const editEmpForm = document.getElementById("edit-employee-form");
+
+            if (editEmpBtn && cancelEditBtn && viewEmpContainer && editEmpForm) {
+                editEmpBtn.addEventListener("click", function() {
+                    viewEmpContainer.style.display = "none";
+                    editEmpBtn.style.display = "none";
+                    editEmpForm.style.display = "block";
+                });
+
+                cancelEditBtn.addEventListener("click", function() {
+                    editEmpForm.style.display = "none";
+                    editEmpBtn.style.display = "inline-flex";
+                    viewEmpContainer.style.display = "grid";
+                });
+            }
+
+            // Handle Edit Employee Form Submission
+            if (editEmpForm) {
+                editEmpForm.addEventListener("submit", function(e) {
+                    e.preventDefault();
+                    
+                    const formData = new FormData(editEmpForm);
+                    
+                    fetch("employees.php", {
+                        method: "POST",
+                        body: formData
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            const emp = data.data;
+                            const empId = formData.get("employee_id");
+                            
+                            // 1. Update the static elements in the profile block
+                            document.getElementById("view-emp-fullname").textContent = emp.full_name;
+                            document.getElementById("view-emp-no").textContent = emp.emp_no;
+                            document.getElementById("view-emp-desig").textContent = emp.designation;
+                            document.getElementById("view-emp-company").textContent = emp.company_name + " (" + emp.branch_name + ")";
+                            document.getElementById("view-emp-nic").textContent = emp.nic_number;
+                            document.getElementById("view-emp-contact").innerHTML = '<i class="fa-solid fa-phone"></i> ' + emp.mobile_number + '<br><i class="fa-solid fa-envelope"></i> ' + emp.mail_address;
+                            
+                            // 2. Update data-attributes on the clickable cell in the table grid
+                            const cell = document.querySelector(`.clickable-name[data-id="${empId}"]`);
+                            if (cell) {
+                                cell.dataset.fullname = emp.full_name;
+                                cell.dataset.name = emp.calling_name;
+                                cell.dataset.empno = emp.emp_no;
+                                cell.dataset.desig = emp.designation;
+                                cell.dataset.comp = emp.company_name;
+                                cell.dataset.branch = emp.branch_name;
+                                cell.dataset.compid = emp.company_id;
+                                cell.dataset.branchid = emp.branch_id;
+                                cell.dataset.nic = emp.nic_number;
+                                cell.dataset.mobile = emp.mobile_number;
+                                cell.dataset.email = emp.mail_address;
+                                cell.dataset.date = emp.joining_date;
+                                
+                                // Update visual cells in table grid row
+                                const row = cell.closest("tr");
+                                if (row) {
+                                    const cells = row.querySelectorAll("td");
+                                    // EMP NO (td at index 0)
+                                    if (cells.length > 0) {
+                                        cells[0].textContent = emp.emp_no;
+                                    }
+                                    
+                                    // Calling Name
+                                    const strong = row.querySelector("td.clickable-name strong");
+                                    if (strong) strong.textContent = emp.calling_name;
+                                    
+                                    // Full Name (td at index 2)
+                                    if (cells.length > 2) {
+                                        cells[2].textContent = emp.full_name;
+                                    }
+                                    // Designation (td at index 3)
+                                    if (cells.length > 3) {
+                                        cells[3].textContent = emp.designation;
+                                    }
+                                    
+                                    // Company / Branch badges
+                                    const companyBadge = row.querySelector(".company-badge");
+                                    if (companyBadge) companyBadge.textContent = emp.company_name;
+                                    const branchBadge = row.querySelector(".branch-badge");
+                                    if (branchBadge) branchBadge.textContent = emp.branch_name;
+                                    
+                                    // Mobile (td at index 5)
+                                    if (cells.length > 5) {
+                                        cells[5].textContent = emp.mobile_number;
+                                    }
+                                    // Email (td at index 6)
+                                    if (cells.length > 6) {
+                                        cells[6].textContent = emp.mail_address;
+                                    }
+                                    // Join Date (td at index 7)
+                                    if (cells.length > 7) {
+                                        cells[7].textContent = emp.joining_date;
+                                    }
+                                }
+                            }
+                            
+                            // Revert view
+                            editEmpForm.style.display = "none";
+                            editEmpBtn.style.display = "inline-flex";
+                            viewEmpContainer.style.display = "grid";
+                            
+                            alert("Employee profile updated successfully!");
+                        } else {
+                            alert("Error updating profile: " + data.message);
+                        }
+                    })
+                    .catch(err => {
+                        console.error("Error saving employee profile:", err);
+                        alert("An error occurred while saving profile changes. Please try again.");
+                    });
                 });
             }
 
@@ -1337,9 +1733,23 @@ $employees = $dataStmt->fetchAll();
                                 } else {
                                     filterBranchSelect.disabled = true;
                                 }
+                                // Submit form after updating branch dropdown
+                                const form = filterCompanySelect.closest("form");
+                                if (form) form.submit();
                             });
                     } else {
                         filterBranchSelect.disabled = true;
+                        const form = filterCompanySelect.closest("form");
+                        if (form) form.submit();
+                    }
+                });
+            }
+
+            if (filterBranchSelect) {
+                filterBranchSelect.addEventListener("change", function() {
+                    const form = this.closest("form");
+                    if (form) {
+                        form.submit();
                     }
                 });
             }

@@ -377,6 +377,11 @@ $items = $dataStmt->fetchAll();
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li>
+                    <a href="issues_history.php" class="sidebar-item-link">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span>Issues History</span>
+                    </a>
+                </li>
                 <li class="sidebar-submenu-container">
                     <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
                         <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron" style="margin-left:auto; font-size: 0.8rem;"></i>
@@ -450,7 +455,6 @@ $items = $dataStmt->fetchAll();
                         </select>
                     </div>
                     <div style="display:flex; gap: 0.5rem;">
-                        <button type="submit" class="btn-primary" style="margin-top:0; padding: 0.85rem 1.5rem; font-size:0.95rem; width:auto; display:inline-flex; align-items:center; gap:0.5rem;"><i class="fa-solid fa-magnifying-glass"></i> Filter</button>
                         <a href="inventory.php" class="btn-logout" style="padding:0.85rem 1.5rem; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none;"><i class="fa-solid fa-rotate-left"></i> Reset</a>
                     </div>
                 </form>
@@ -796,6 +800,17 @@ $items = $dataStmt->fetchAll();
                     docMgmtSubmenu.classList.toggle("show");
                     if (submenuChevron) submenuChevron.classList.toggle("rotate");
                     localStorage.setItem("doc-mgmt-open", docMgmtSubmenu.classList.contains("show"));
+                });
+            }
+
+            // Live filtering for Category select option
+            const filterCategorySelect = document.querySelector(".filter-panel select[name='filter_category']");
+            if (filterCategorySelect) {
+                filterCategorySelect.addEventListener("change", function() {
+                    const form = this.closest("form");
+                    if (form) {
+                        form.submit();
+                    }
                 });
             }
         });

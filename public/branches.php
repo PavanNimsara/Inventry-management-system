@@ -237,6 +237,11 @@ $branches = $branchesStmt->fetchAll();
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li>
+                    <a href="issues_history.php" class="sidebar-item-link">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span>Issues History</span>
+                    </a>
+                </li>
                 <li class="sidebar-submenu-container">
                     <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
                         <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron" style="margin-left:auto; font-size: 0.8rem;"></i>

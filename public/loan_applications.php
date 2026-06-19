@@ -591,6 +591,11 @@ if ($view_branch_id > 0) {
                         <i class="fa-solid fa-user-gear"></i> <span>Profile Settings</span>
                     </a>
                 </li>
+                <li>
+                    <a href="issues_history.php" class="sidebar-item-link">
+                        <i class="fa-solid fa-clock-rotate-left"></i> <span>Issues History</span>
+                    </a>
+                </li>
                 <li class="sidebar-submenu-container">
                     <a href="#" class="sidebar-item-link" id="doc-mgmt-toggle">
                         <i class="fa-solid fa-file-invoice"></i> <span>Document Management</span> <i class="fa-solid fa-chevron-down submenu-chevron rotate" style="margin-left:auto; font-size: 0.8rem;"></i>
@@ -676,7 +681,6 @@ if ($view_branch_id > 0) {
                         </select>
                     </div>
                     <div style="display:flex; gap: 0.5rem; margin-bottom: 0;">
-                        <button type="submit" class="btn-primary" style="margin-top:0; padding: 0.85rem 1.5rem; font-size:0.95rem; width:auto; display:inline-flex; align-items:center; gap:0.5rem;"><i class="fa-solid fa-magnifying-glass"></i> Filter</button>
                         <a href="loan_applications.php" class="btn-logout" style="padding:0.85rem 1.5rem; border-radius:12px; display:inline-flex; align-items:center; justify-content:center; text-decoration:none;"><i class="fa-solid fa-rotate-left"></i> Reset</a>
                     </div>
                 </form>
@@ -1010,7 +1014,20 @@ if ($view_branch_id > 0) {
                     }
                 }
                 
-                filterCompanySelect.addEventListener("change", updateBranchFilter);
+                filterCompanySelect.addEventListener("change", function() {
+                    updateBranchFilter();
+                    const form = this.closest("form");
+                    if (form) {
+                        form.submit();
+                    }
+                });
+
+                filterBranchSelect.addEventListener("change", function() {
+                    const form = this.closest("form");
+                    if (form) {
+                        form.submit();
+                    }
+                });
                 
                 // Initialize on load
                 updateBranchFilter();
@@ -1020,6 +1037,17 @@ if ($view_branch_id > 0) {
                 if (activeBranch) {
                     filterBranchSelect.value = activeBranch;
                 }
+            }
+
+            // Live filtering for Category filter option
+            const filterCategorySelect = document.querySelector(".filter-panel select[name='filter_category']");
+            if (filterCategorySelect) {
+                filterCategorySelect.addEventListener("change", function() {
+                    const form = this.closest("form");
+                    if (form) {
+                        form.submit();
+                    }
+                });
             }
 
             // Company -> Branch Modal Dropdown Dynamic behavior

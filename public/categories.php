@@ -225,6 +225,7 @@ $categories = $categoriesStmt->fetchAll(PDO::FETCH_ASSOC);
                 <a href="logout.php" class="sidebar-item-link" style="color: var(--error-color);">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i> <span>Logout</span>
                 </a>
+                <span class="sidebar-footer-copyright">All rights reserved.<br>Developed by Pawan</span>
             </div>
         </aside>
 

@@ -755,6 +755,7 @@ $employees = $dataStmt->fetchAll();
                 <a href="logout.php" class="sidebar-item-link" style="color: var(--error-color);">
                     <i class="fa-solid fa-arrow-right-from-bracket"></i> <span>Logout</span>
                 </a>
+                <span class="sidebar-footer-copyright">All rights reserved.<br>Developed by Pawan</span>
             </div>
         </aside>
 
@@ -869,9 +870,9 @@ $employees = $dataStmt->fetchAll();
                             </thead>
                             <tbody>
                                 <?php foreach($employees as $emp): ?>
-                                    <tr>
+                                    <tr class="clickable-row" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-compid="<?php echo $emp['company_id']; ?>" data-branchid="<?php echo $emp['branch_id']; ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>" data-status="<?php echo htmlspecialchars($emp['status']); ?>">
                                         <td style="font-weight:700; color: var(--accent-color);"><?php echo htmlspecialchars($emp['emp_no']); ?></td>
-                                        <td class="clickable-name" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>" data-fullname="<?php echo htmlspecialchars($emp['full_name']); ?>" data-empno="<?php echo htmlspecialchars($emp['emp_no']); ?>" data-desig="<?php echo htmlspecialchars($emp['designation']); ?>" data-comp="<?php echo htmlspecialchars($emp['company_name']); ?>" data-branch="<?php echo htmlspecialchars($emp['branch_name']); ?>" data-compid="<?php echo $emp['company_id']; ?>" data-branchid="<?php echo $emp['branch_id']; ?>" data-email="<?php echo htmlspecialchars($emp['mail_address']); ?>" data-mobile="<?php echo htmlspecialchars($emp['mobile_number']); ?>" data-nic="<?php echo htmlspecialchars($emp['nic_number']); ?>" data-date="<?php echo htmlspecialchars($emp['joining_date']); ?>" data-status="<?php echo htmlspecialchars($emp['status']); ?>">
+                                        <td>
                                             <strong><?php echo htmlspecialchars($emp['calling_name']); ?></strong>
                                         </td>
                                         <td style="color:var(--text-secondary);"><?php echo htmlspecialchars($emp['full_name']); ?></td>
@@ -892,7 +893,7 @@ $employees = $dataStmt->fetchAll();
                                                 <?php echo htmlspecialchars($emp['status']); ?>
                                             </span>
                                         </td>
-                                        <td style="text-align: center;">
+                                        <td style="text-align: center;" class="prevent-row-click">
                                             <button class="btn-issue open-issue-btn" data-id="<?php echo $emp['id']; ?>" data-name="<?php echo htmlspecialchars($emp['calling_name']); ?>">
                                                 <i class="fa-solid fa-hand-holding"></i> Issue Item
                                             </button>
@@ -1332,10 +1333,15 @@ $employees = $dataStmt->fetchAll();
                 });
             }
 
-            // Handle Click Employee Name to View Issued Items Detail Modal
-            const clickableNames = document.querySelectorAll(".clickable-name");
-            clickableNames.forEach(cell => {
-                cell.addEventListener("click", function() {
+            // Handle Click Employee Row to View Issued Items Detail Modal
+            const clickableRows = document.querySelectorAll(".clickable-row");
+            clickableRows.forEach(row => {
+                row.addEventListener("click", function(e) {
+                    // Check if clicked element or its ancestors are marked as prevent-row-click
+                    if (e.target.closest('.prevent-row-click')) {
+                        return;
+                    }
+                    
                     const empId = this.dataset.id;
                     
                     // Reset modal to View Mode (Read-only)
@@ -1396,14 +1402,14 @@ $employees = $dataStmt->fetchAll();
                             tbody.innerHTML = '';
                             if (data.length > 0) {
                                 data.forEach(issue => {
-                                    const row = document.createElement('tr');
-                                    row.innerHTML = `
+                                    const r = document.createElement('tr');
+                                    r.innerHTML = `
                                         <td><span class="badge category-badge">${escapeHtml(issue.category_name)}</span></td>
                                         <td style="font-weight:600;">${escapeHtml(issue.item_name)}</td>
                                         <td><span class="badge qty-badge">${issue.quantity}</span></td>
                                         <td style="font-size:0.9rem; color:var(--text-secondary);">${issue.issue_date}</td>
                                     `;
-                                    tbody.appendChild(row);
+                                    tbody.appendChild(r);
                                 });
                             } else {
                                 tbody.innerHTML = '<tr><td colspan="4" style="text-align:center; padding: 2rem 0; color:var(--text-secondary);"><i class="fa-solid fa-box-open" style="display:block; font-size:2rem; margin-bottom:0.5rem; opacity:0.2;"></i> No items issued to this employee yet.</td></tr>';
@@ -1437,16 +1443,13 @@ $employees = $dataStmt->fetchAll();
                         .then(data => {
                             if (data.success) {
                                 // Update status data attribute on the clickable element
-                                const nameCell = document.querySelector(`.clickable-name[data-id="${empId}"]`);
+                                const nameCell = document.querySelector(`.clickable-row[data-id="${empId}"]`);
                                 if (nameCell) {
                                     nameCell.dataset.status = newStatus;
-                                    const row = nameCell.closest("tr");
-                                    if (row) {
-                                        const badgeCell = row.querySelector("span.badge[class*='status-badge-']");
-                                        if (badgeCell) {
-                                            badgeCell.className = `badge status-badge-${newStatus.toLowerCase()}`;
-                                            badgeCell.textContent = newStatus;
-                                        }
+                                    const badgeCell = nameCell.querySelector("span.badge[class*='status-badge-']");
+                                    if (badgeCell) {
+                                        badgeCell.className = `badge status-badge-${newStatus.toLowerCase()}`;
+                                        badgeCell.textContent = newStatus;
                                     }
                                 }
                             } else {
@@ -1567,62 +1570,61 @@ $employees = $dataStmt->fetchAll();
                             document.getElementById("view-emp-nic").textContent = emp.nic_number;
                             document.getElementById("view-emp-contact").innerHTML = '<i class="fa-solid fa-phone"></i> ' + emp.mobile_number + '<br><i class="fa-solid fa-envelope"></i> ' + emp.mail_address;
                             
-                            // 2. Update data-attributes on the clickable cell in the table grid
-                            const cell = document.querySelector(`.clickable-name[data-id="${empId}"]`);
-                            if (cell) {
-                                cell.dataset.fullname = emp.full_name;
-                                cell.dataset.name = emp.calling_name;
-                                cell.dataset.empno = emp.emp_no;
-                                cell.dataset.desig = emp.designation;
-                                cell.dataset.comp = emp.company_name;
-                                cell.dataset.branch = emp.branch_name;
-                                cell.dataset.compid = emp.company_id;
-                                cell.dataset.branchid = emp.branch_id;
-                                cell.dataset.nic = emp.nic_number;
-                                cell.dataset.mobile = emp.mobile_number;
-                                cell.dataset.email = emp.mail_address;
-                                cell.dataset.date = emp.joining_date;
+                            // 2. Update data-attributes on the clickable row element in the table grid
+                            const row = document.querySelector(`.clickable-row[data-id="${empId}"]`);
+                            if (row) {
+                                row.dataset.fullname = emp.full_name;
+                                row.dataset.name = emp.calling_name;
+                                row.dataset.empno = emp.emp_no;
+                                row.dataset.desig = emp.designation;
+                                row.dataset.comp = emp.company_name;
+                                row.dataset.branch = emp.branch_name;
+                                row.dataset.compid = emp.company_id;
+                                row.dataset.branchid = emp.branch_id;
+                                row.dataset.nic = emp.nic_number;
+                                row.dataset.mobile = emp.mobile_number;
+                                row.dataset.email = emp.mail_address;
+                                row.dataset.date = emp.joining_date;
                                 
                                 // Update visual cells in table grid row
-                                const row = cell.closest("tr");
-                                if (row) {
-                                    const cells = row.querySelectorAll("td");
-                                    // EMP NO (td at index 0)
-                                    if (cells.length > 0) {
-                                        cells[0].textContent = emp.emp_no;
-                                    }
-                                    
-                                    // Calling Name
-                                    const strong = row.querySelector("td.clickable-name strong");
+                                const cells = row.querySelectorAll("td");
+                                // EMP NO (td at index 0)
+                                if (cells.length > 0) {
+                                    cells[0].textContent = emp.emp_no;
+                                }
+                                
+                                // Calling Name (td at index 1)
+                                if (cells.length > 1) {
+                                    const strong = cells[1].querySelector("strong");
                                     if (strong) strong.textContent = emp.calling_name;
-                                    
-                                    // Full Name (td at index 2)
-                                    if (cells.length > 2) {
-                                        cells[2].textContent = emp.full_name;
-                                    }
-                                    // Designation (td at index 3)
-                                    if (cells.length > 3) {
-                                        cells[3].textContent = emp.designation;
-                                    }
-                                    
-                                    // Company / Branch badges
-                                    const companyBadge = row.querySelector(".company-badge");
-                                    if (companyBadge) companyBadge.textContent = emp.company_name;
-                                    const branchBadge = row.querySelector(".branch-badge");
-                                    if (branchBadge) branchBadge.textContent = emp.branch_name;
-                                    
-                                    // Mobile (td at index 5)
-                                    if (cells.length > 5) {
-                                        cells[5].textContent = emp.mobile_number;
-                                    }
-                                    // Email (td at index 6)
-                                    if (cells.length > 6) {
-                                        cells[6].textContent = emp.mail_address;
-                                    }
-                                    // Join Date (td at index 7)
-                                    if (cells.length > 7) {
-                                        cells[7].textContent = emp.joining_date;
-                                    }
+                                }
+                                
+                                // Full Name (td at index 2)
+                                if (cells.length > 2) {
+                                    cells[2].textContent = emp.full_name;
+                                }
+                                // Designation (td at index 3)
+                                if (cells.length > 3) {
+                                    cells[3].textContent = emp.designation;
+                                }
+                                
+                                // Company / Branch badges
+                                const companyBadge = row.querySelector(".company-badge");
+                                if (companyBadge) companyBadge.textContent = emp.company_name;
+                                const branchBadge = row.querySelector(".branch-badge");
+                                if (branchBadge) branchBadge.textContent = emp.branch_name;
+                                
+                                // Mobile (td at index 5)
+                                if (cells.length > 5) {
+                                    cells[5].textContent = emp.mobile_number;
+                                }
+                                // Email (td at index 6)
+                                if (cells.length > 6) {
+                                    cells[6].textContent = emp.mail_address;
+                                }
+                                // Join Date (td at index 7)
+                                if (cells.length > 7) {
+                                    cells[7].textContent = emp.joining_date;
                                 }
                             }
                             

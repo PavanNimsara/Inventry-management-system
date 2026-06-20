@@ -633,6 +633,39 @@ a:hover {
     transform: rotate(180deg);
 }
 
+/* Sidebar Footer Copyright Text style */
+.sidebar-footer-copyright {
+    display: block;
+    font-size: 0.7rem;
+    color: var(--text-secondary);
+    text-align: center;
+    margin-top: 1rem;
+    opacity: 0.6;
+    line-height: 1.3;
+}
+.sidebar.collapsed .sidebar-footer-copyright {
+    display: none !important;
+}
+
+/* Clickable table row styles for Employee list */
+.employee-table tr.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.2s ease;
+}
+.employee-table tr.clickable-row:hover td {
+    background: rgba(255, 255, 255, 0.04) !important;
+}
+.clickable-row strong {
+    color: #818cf8;
+    text-decoration: underline;
+}
+.clickable-row:hover strong {
+    color: #a5b4fc;
+}
+.dark .employee-table tr.clickable-row:hover td {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
 
 
 

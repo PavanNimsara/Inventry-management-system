@@ -310,7 +310,7 @@ try {
         </table>
 
         <div class="footer">
-            Monik Group &copy; <?php echo date('Y'); ?>. All rights reserved.
+            All rights reserved. Developed by Pawan
         </div>
     </div>
 
